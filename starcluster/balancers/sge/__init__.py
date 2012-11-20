@@ -7,6 +7,8 @@ from starcluster import utils
 from starcluster import static
 from starcluster import exception
 from starcluster.balancers import LoadBalancer
+from starcluster.balancers.statemachines.typefallback import TfBState
+from starcluster.balancers.statemachines.statemachine import StateMachine
 from starcluster.logger import log
 
 
@@ -390,7 +392,7 @@ class SGELoadBalancer(LoadBalancer):
                  add_pi=1, kill_after=45, stab=180, lookback_win=3,
                  min_nodes=1, kill_cluster=False, plot_stats=False,
                  plot_output_dir=None, dump_stats=False, stats_file=None):
-        self._cluster = None
+        self.cluster = None
         self._keep_polling = True
         self._visualizer = None
         self.__last_cluster_mod_time = datetime.datetime.utcnow()
@@ -462,7 +464,7 @@ class SGELoadBalancer(LoadBalancer):
         and returns a datetime object with the master's time
         instead of fetching it from local machine, maybe inaccurate.
         """
-        str = '\n'.join(self._cluster.master_node.ssh.execute('date'))
+        str = '\n'.join(self.cluster.master_node.ssh.execute('date'))
         return datetime.datetime.strptime(str, "%a %b %d %H:%M:%S UTC %Y")
 
     def get_qatime(self, now):
@@ -483,7 +485,7 @@ class SGELoadBalancer(LoadBalancer):
         return str
 
     def _get_stats(self):
-        master = self._cluster.master_node
+        master = self.cluster.master_node
         now = self.get_remote_time()
         qatime = self.get_qatime(now)
         qacct_cmd = 'qacct -j -b ' + qatime
@@ -530,7 +532,7 @@ class SGELoadBalancer(LoadBalancer):
         decide whether to add or remove a node.  It should later look at job
         durations (currently doesn't)
         """
-        self._cluster = cluster
+        self.cluster = cluster
         if self.max_nodes is None:
             self.max_nodes = cluster.cluster_size
         use_default_stats_file = self.dump_stats and not self.stats_file
@@ -604,7 +606,7 @@ class SGELoadBalancer(LoadBalancer):
             if self.kill_cluster:
                 if self._eval_terminate_cluster():
                     log.info("Terminating cluster and exiting...")
-                    return self._cluster.terminate_cluster()
+                    return self.cluster.terminate_cluster()
             log.info("Sleeping...(looping again in %d secs)\n" %
                      self.polling_interval)
             time.sleep(self.polling_interval)
@@ -657,13 +659,16 @@ class SGELoadBalancer(LoadBalancer):
                 if 0 < ettc < 600 and not self.stat.on_first_job():
                     log.warn("There is a possibility that the job queue is"
                              " shorter than 10 minutes in duration")
-        max_add = self.max_nodes - len(self._cluster.running_nodes)
+        max_add = self.max_nodes - len(self.cluster.running_nodes)
         need_to_add = min(self.add_nodes_per_iteration, need_to_add, max_add)
         if need_to_add > 0:
             log.warn("Adding %d nodes at %s" %
                      (need_to_add, str(datetime.datetime.utcnow())))
             try:
-                self._cluster.add_nodes(need_to_add)
+                #TODO: tell it how many we want
+                StateMachine(self, TfbState).run()
+                #TODO: keep the old way
+                #self.cluster.add_nodes(need_to_add)
                 self.__last_cluster_mod_time = datetime.datetime.utcnow()
                 log.info("Done adding nodes at %s" %
                          str(datetime.datetime.utcnow()))
@@ -697,7 +702,7 @@ class SGELoadBalancer(LoadBalancer):
             log.warn("Removing %s: %s (%s)" %
                      (node.alias, node.id, node.dns_name))
             try:
-                self._cluster.remove_node(node)
+                self.cluster.remove_node(node)
                 self.__last_cluster_mod_time = datetime.datetime.utcnow()
             except Exception:
                 log.error("Failed to remove node %s" % node.alias,
@@ -711,9 +716,9 @@ class SGELoadBalancer(LoadBalancer):
         2. The master node is not running any SGE jobs
         3. The master node has been up for at least self.kill_after mins
         """
-        if len(self._cluster.running_nodes) != 1:
+        if len(self.cluster.running_nodes) != 1:
             return False
-        return self._should_remove(self._cluster.master_node)
+        return self._should_remove(self.cluster.master_node)
 
     def _should_remove(self, node):
         """
@@ -746,7 +751,7 @@ class SGELoadBalancer(LoadBalancer):
         removal.
         """
         remove_nodes = []
-        for node in self._cluster.running_nodes:
+        for node in self.cluster.running_nodes:
             if max_remove is not None and len(remove_nodes) >= max_remove:
                 return remove_nodes
             if node.is_master():
