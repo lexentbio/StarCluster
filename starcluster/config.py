@@ -76,6 +76,7 @@ class StarClusterConfig(object):
     plugin_settings = static.PLUGIN_SETTINGS
     cluster_settings = static.CLUSTER_SETTINGS
     permission_settings = static.PERMISSION_SETTINGS
+    statemachine_settings = static.STATEMACHINE_SETTINGS
 
     # until i can find a way to query AWS for instance types...
     instance_types = static.INSTANCE_TYPES
@@ -567,6 +568,9 @@ class StarClusterConfig(object):
                                                self.permission_settings)
         sections = self._get_sections('cluster')
         self.clusters = self._load_cluster_sections(sections)
+
+        self.statemachines = self._load_sections('statemachine',
+                                                 self.statemachine_settings)
         return self
 
     def get_aws_from_environ(self):

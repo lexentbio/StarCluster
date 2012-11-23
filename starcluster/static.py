@@ -203,3 +203,7 @@ CLUSTER_SETTINGS = {
     'force_spot_master': (bool, False, False, None, None),
     'disable_cloudinit': (bool, False, False, None, None),
 }
+
+STATEMACHINE_SETTINGS = {
+    'statemachine_class' : (str, True, None, None, __expand_all),
+}
