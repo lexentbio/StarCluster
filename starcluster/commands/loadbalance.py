@@ -78,12 +78,21 @@ class CmdLoadBalance(ClusterCompleter):
         parser.add_option("-K", "--kill-cluster", dest="kill_cluster",
                           action="store_true", default=False,
                           help="Terminate the cluster when the queue is empty")
+        parser.add_option("--statemachine", dest="statemachine",
+                          action="store", default=None,
+                          help="Defines a state machine to use when adding nodes")
 
     def execute(self, args):
         if not self.cfg.globals.enable_experimental:
             raise exception.ExperimentalFeature("The 'loadbalance' command")
         if len(args) != 1:
             self.parser.error("please specify a <cluster_tag>")
+
+        if self.opts.statemachine and \
+                self.opts.statemachine not in self.cfg.statemachines:
+            self.parser.error("The specified state machine is not "\
+                              "part of the config file.")
+
         cluster_tag = args[0]
         cluster = self.cm.get_cluster(cluster_tag)
         lb = sge.SGELoadBalancer(**self.specified_options_dict)

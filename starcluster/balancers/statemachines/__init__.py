@@ -1,5 +1,4 @@
-import traceback
-from starcluster.logger import log
+import datetime
 
 #From http://stackoverflow.com/questions/31875/is-there-a-simple-elegant-way-to-define-singletons-in-python/33201#33201
 class Singleton(type):
@@ -30,64 +29,62 @@ class StateMachineException(Exception):
         
 class StateMachine(object):
 
-    def __init__(self, entity, parent_state_class):
-        self._entity = entity;
-        self._available_states = inheritors(stateClass)
+    def __init__(self, loadbalancer, parent_state_class, settings):
+        self._lb = loadbalancer;
+        self._available_states = inheritors(parent_state_class)
         self._parent_state_class = parent_state_class
         self._latest_state = None
+        self._settings = settings
+        parent_state_class.validate(self._lb, settings)
 
     def _getCurrentState(self):
         """
             Will call isInState method on all states of the _available_states list.
             If a single state is found, returns it. Else, raises an Exception.
         """
-        
-        self._entity.refresh()
+        self._parent_state_class.preIsInState(self._lb)
         states = []
-        for state_class in self._available_states:
+        for state_class in self._latest_state.valid_transitions:
             state_obj = state_class()
-            if state_obj.isInState(self._entity):
+            if state_obj.isInState(self._lb):
                 states.append(state_obj)
 
         if len(states) == 1:
             return states[0]
         if len(states) == 0:
-            raise StateMachineException("No state could be associated to [%s]" % self._entity.getName())
-        raise StateMachineException("More than one state could be associated to [%s]" % self._entity.getName())
+            raise StateMachineException("No state could be associated")
+        raise StateMachineException("More than one state could be associated")
 
     def run(self):
-        try:
+        self._parent_state_class.init(self._lb, self._settings)
+        for state_class in self._available_states:
+            if state_class.__name__ == "Start":
+                self._latest_state = state_class()
+                break
+        current_state = self._getCurrentState()
+        print current_state
+        sys.exit()
+        while current_state.doTheRightThing(self._lb):
+            self._latest_state = current_state 
             current_state = self._getCurrentState()
-            while current_state.doTheRightThing(self._entity):
-                new_state = self._getCurrentState()
-                if not current_state.isValidTransition(new_state):
-                    #TODO: error
-                current_state = new_state
-        except Exception as exc:
-            messages.append(exc.message)
-            traceback.print_exc(exc)
     
 class State(object):
     def __str__(self):
         return self.__class__.__name__
 
     def isInState(self):
+        """
+        To implement in the states.
+        Returns true if the process is in this state.
+        """
         raise Exception("Should be implemented in the state itself")
 
-    def isValidTransition(self, newState):
+    def doTheRightThing(self, lb):
         """
-            Uses the current_state.validTransitions list to determine
-            if the unitary transition toward the newState is valid.
+        To implement in the states.
+        When a state if found, this is called to make it do its business
         """
-        return newState.__class__ in self.validTransitions
-
-    def doTheRightThing(self, entity):
-        """
-            Where states do their work. Returns true if the state might have changed
-            after the work. Passing state should obviously return false to avoid
-            to uselesly recalculate the new state.
-        """
-        return False;
+        raise Exception("Should be implemented in the state itself")
 
 
 

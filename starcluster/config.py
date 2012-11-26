@@ -570,7 +570,8 @@ class StarClusterConfig(object):
         self.clusters = self._load_cluster_sections(sections)
 
         self.statemachines = self._load_sections('statemachine',
-                                                 self.statemachine_settings)
+                                                 self.statemachine_settings,
+                                                filter_settings=False)
         return self
 
     def get_aws_from_environ(self):

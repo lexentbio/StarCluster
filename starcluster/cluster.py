@@ -1608,7 +1608,7 @@ class ClusterValidator(validators.Validator):
             self.validate_zone()
             self.validate_ebs_settings()
             self.validate_ebs_aws_settings()
-            self.validate_image_settings()
+            self.validate_cluster_image_settings()
             self.validate_instance_types()
             self.validate_cluster_compute()
             log.info('Cluster template settings are valid')
@@ -1671,26 +1671,25 @@ class ClusterValidator(validators.Validator):
                 ' '.join(static.AVAILABLE_SHELLS.keys()))
         return True
 
-    def validate_image_settings(self):
+    def validate_image_settings(self, image_id, name):
+        conn = self.cluster.ec2
+        image = conn.get_image_or_none(image_id)
+        if not image or image.id != image_id:
+            raise exception.ClusterValidationError(
+                '%s %s does not exist' % (name, image_id))
+        if image.state != 'available':
+            raise exception.ClusterValidationError(
+                '%s %s is not available' % (name, image_id))
+        
+
+    def validate_cluster_image_settings(self):
         cluster = self.cluster
         master_image_id = cluster.master_image_id
         node_image_id = cluster.node_image_id
         conn = cluster.ec2
         image = conn.get_image_or_none(node_image_id)
-        if not image or image.id != node_image_id:
-            raise exception.ClusterValidationError(
-                'node_image_id %s does not exist' % node_image_id)
-        if image.state != 'available':
-            raise exception.ClusterValidationError(
-                'node_image_id %s is not available' % node_image_id)
-        if master_image_id:
-            master_image = conn.get_image_or_none(master_image_id)
-            if not master_image or master_image.id != master_image_id:
-                raise exception.ClusterValidationError(
-                    'master_image_id %s does not exist' % master_image_id)
-            if master_image.state != 'available':
-                raise exception.ClusterValidationError(
-                    'master_image_id %s is not available' % master_image_id)
+        self.validate_image_settings(node_image_id, 'node_image_id')
+        self.validate_image_settings(master_image_id, 'master_image_id')
         return True
 
     def validate_zone(self):
@@ -1750,6 +1749,9 @@ class ClusterValidator(validators.Validator):
                          (instance_type, image.id))
             raise exception.ClusterValidationError(error_msg)
         return True
+
+    def check_platform(self, image_id, instance_type):
+        self.__check_platform(image_id, instance_type)
 
     def validate_instance_types(self):
         cluster = self.cluster

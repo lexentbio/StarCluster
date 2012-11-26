@@ -205,5 +205,5 @@ CLUSTER_SETTINGS = {
 }
 
 STATEMACHINE_SETTINGS = {
-    'statemachine_class' : (str, True, None, None, __expand_all),
+    'state_class' : (str, True, None, None, __expand_all),
 }
