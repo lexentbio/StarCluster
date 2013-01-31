@@ -2,6 +2,7 @@ import os
 import urllib
 import StringIO
 import ConfigParser
+import copy
 
 from starcluster import utils
 from starcluster import static
@@ -724,7 +725,7 @@ class StarClusterConfig(object):
         return self.aws
 
     def get_cluster_template(self, template_name, tag_name=None,
-                             ec2_conn=None):
+                             ec2_conn=None, load_plugins=True):
         """
         Returns Cluster instance configured with the settings in the
         config file.
@@ -739,8 +740,16 @@ class StarClusterConfig(object):
             kwargs.update(dict(cluster_tag=tag_name))
             kwargs.update(self.clusters[template_name])
             plugs = kwargs.get('plugins')
-            kwargs['plugins'] = deathrow._load_plugins(plugs,
-                                                       debug=DEBUG_CONFIG)
+            plugins_order = []
+            for p in plugs:
+                plugins_order.append(p["setup_class"].split(".")[-1])
+            kwargs['plugins_order'] = plugins_order
+            if load_plugins:
+                kwargs['plugins'] = deathrow._load_plugins(plugs,
+                                                           debug=DEBUG_CONFIG)
+            else:
+                kwargs['plugins'] = []
+
             if not ec2_conn:
                 ec2_conn = self.get_easy_ec2()
             clust = Cluster(ec2_conn, **kwargs)

@@ -4,6 +4,7 @@ import stat
 import base64
 import posixpath
 import subprocess
+import config
 
 from starcluster import utils
 from starcluster import static
