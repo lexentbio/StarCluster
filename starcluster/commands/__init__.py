@@ -36,6 +36,8 @@ from removekey import CmdRemoveKey
 from put import CmdPut
 from get import CmdGet
 from help import CmdHelp
+from reloadconfig import CmdReloadConfig
+from printconfig import CmdPrintConfig
 
 all_cmds = [
     CmdStart(),
@@ -76,4 +78,6 @@ all_cmds = [
     CmdRunPlugin(),
     CmdShell(),
     CmdHelp(),
+    CmdPrintConfig(),
+    CmdReloadConfig(),
 ]

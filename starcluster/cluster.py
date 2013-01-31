@@ -370,6 +370,7 @@ class Cluster(object):
                  cluster_group=None,
                  force_spot_master=False,
                  disable_cloudinit=False,
+                 plugins_order=[],
                  **kwargs):
 
         now = time.strftime("%Y%m%d%H%M")
@@ -402,6 +403,7 @@ class Cluster(object):
         self.disable_threads = disable_threads
         self.force_spot_master = force_spot_master
         self.disable_cloudinit = disable_cloudinit
+        self.plugins_order = plugins_order
 
         self._cluster_group = None
         self._placement_group = None
@@ -412,6 +414,7 @@ class Cluster(object):
         self._progress_bar = None
         self.__default_plugin = None
         self.__sge_plugin = None
+        self._config_fields = None
 
     def __repr__(self):
         return '<Cluster: %s (%s-node)>' % (self.cluster_tag,
@@ -535,6 +538,12 @@ class Cluster(object):
         cfg = self.__getstate__()
         return pprint.pformat(cfg)
 
+    def print_config(self):
+        config = {}
+        for key in self._config_fields:
+            config[key] = getattr(self, key)
+        pprint.pprint(config)
+
     def load_receipt(self, load_plugins=True, load_volumes=True):
         """
         Load the original settings used to launch this cluster into this
@@ -559,6 +568,7 @@ class Cluster(object):
                 user = tags.get(static.USER_TAG, '')
                 cluster_settings.update(
                     utils.decode_uncompress_load(user, use_json=True))
+            self._config_fields = cluster_settings.keys()
             self.update(cluster_settings)
             if not (load_plugins or load_volumes):
                 return True
@@ -574,7 +584,8 @@ class Cluster(object):
                 else:
                     raise
             if load_plugins:
-                self.plugins = self.load_plugins(master.get_plugins())
+                self.plugins = self.load_plugins(
+                    master.get_plugins(self.plugins_order))
             if load_volumes:
                 self.volumes = master.get_volumes()
         except exception.PluginError:
@@ -704,6 +715,26 @@ class Cluster(object):
         self._nodes.sort(key=lambda n: n.alias)
         log.debug('returning self._nodes = %s' % self._nodes)
         return self._nodes
+
+    def save_core_settings(self, sg):
+        core_settings = utils.dump_compress_encode(
+            dict(cluster_size=self.cluster_size,
+                 master_image_id=self.master_image_id,
+                 master_instance_type=self.master_instance_type,
+                 node_image_id=self.node_image_id,
+                 node_instance_type=self.node_instance_type,
+                 disable_queue=self.disable_queue,
+                 disable_cloudinit=self.disable_cloudinit,
+                 plugins_order=self.plugins_order),
+            use_json=True)
+        sg.add_tag(static.CORE_TAG, core_settings)
+
+    def save_user_settings(self, sg):
+        user_settings = utils.dump_compress_encode(
+            dict(cluster_user=self.cluster_user,
+                 cluster_shell=self.cluster_shell, keyname=self.keyname,
+                 spot_bid=self.spot_bid), use_json=True)
+        sg.add_tag(static.USER_TAG, user_settings)
 
     def get_nodes_or_raise(self):
         nodes = self.nodes
