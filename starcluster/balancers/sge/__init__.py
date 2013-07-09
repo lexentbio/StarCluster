@@ -217,7 +217,7 @@ class SGEStats(object):
                 slots += self.queues.get(q).get('slots')
         return slots
 
-    def slots_per_host(self, ignore_master):
+    def slots_per_host(self):
         """
         Returns the number of slots per host. If for some reason the cluster is
         inconsistent, this will return -1 for example, if you have m1.large and
@@ -228,8 +228,7 @@ class SGEStats(object):
             return total
         single = 0
         for q in self.queues:
-            if q.startswith('all.q@') and \
-                    (not ignore_master or q != 'all.q@master'):
+            if q.startswith('all.q@'):
                 single = self.queues.get(q).get('slots')
                 break
         if (total != (single * len(self.hosts))):
