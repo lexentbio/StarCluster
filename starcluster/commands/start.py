@@ -2,7 +2,7 @@ import time
 
 from starcluster import static
 from starcluster import exception
-from starcluster import optcomplete
+from starcluster import completion
 from starcluster.templates import user_msgs
 from starcluster.logger import log
 
@@ -68,8 +68,8 @@ class CmdStart(ClusterCompleter):
                                 dest="cluster_template", choices=templates,
                                 default=None, help="cluster template to use "
                                 "from the config file")
-        if optcomplete:
-            opt.completer = optcomplete.ListCompleter(opt.choices)
+        if completion:
+            opt.completer = completion.ListCompleter(opt.choices)
         parser.add_option("-r", "--refresh-interval", dest="refresh_interval",
                           type="int", action="callback", default=None,
                           callback=self._positive_int,
@@ -99,8 +99,8 @@ class CmdStart(ClusterCompleter):
                                 default=None,
                                 help="shell for cluster user "
                                 "(defaults to bash)")
-        if optcomplete:
-            opt.completer = optcomplete.ListCompleter(opt.choices)
+        if completion:
+            opt.completer = completion.ListCompleter(opt.choices)
         parser.add_option("-m", "--master-image-id", dest="master_image_id",
                           action="store", type="string", default=None,
                           help="AMI to use when launching master")
@@ -109,15 +109,16 @@ class CmdStart(ClusterCompleter):
                           help="AMI to use when launching nodes")
         parser.add_option("-I", "--master-instance-type",
                           dest="master_instance_type", action="store",
-                          choices=static.INSTANCE_TYPES.keys(), default=None,
-                          help="instance type for the master instance")
+                          choices=sorted(static.INSTANCE_TYPES.keys()),
+                          default=None, help="instance type for the master "
+                          "instance")
         opt = parser.add_option("-i", "--node-instance-type",
                                 dest="node_instance_type", action="store",
-                                choices=static.INSTANCE_TYPES.keys(),
+                                choices=sorted(static.INSTANCE_TYPES.keys()),
                                 default=None,
                                 help="instance type for the node instances")
-        if optcomplete:
-            opt.completer = optcomplete.ListCompleter(opt.choices)
+        if completion:
+            opt.completer = completion.ListCompleter(opt.choices)
         parser.add_option("-a", "--availability-zone",
                           dest="availability_zone", action="store",
                           type="string", default=None,
@@ -132,7 +133,7 @@ class CmdStart(ClusterCompleter):
                           help="path to an ssh private key that matches the "
                           "cluster keypair")
         parser.add_option("-U", "--userdata-script", dest="userdata_scripts",
-                          action="append", default=[], metavar="FILE",
+                          action="append", default=None, metavar="FILE",
                           help="Path to userdata script that will run on "
                           "each node on start-up. Can be used multiple times.")
 

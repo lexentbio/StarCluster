@@ -5,10 +5,10 @@ import string
 import pprint
 import warnings
 
+import iptools
+
 from starcluster import utils
 from starcluster import static
-from starcluster import spinner
-from starcluster import iptools
 from starcluster import sshutils
 from starcluster import managers
 from starcluster import userdata
@@ -285,18 +285,22 @@ class ClusterManager(managers.Manager):
             print 'Uptime: %s' % uptime
             print 'Zone: %s' % getattr(n, 'placement', 'N/A')
             print 'Keypair: %s' % getattr(n, 'key_name', 'N/A')
-            ebs_nodes = [n for n in nodes if n.attached_vols]
-            if ebs_nodes:
+            ebs_vols = []
+            for node in nodes:
+                devices = node.attached_vols
+                if not devices:
+                    continue
+                node_id = node.alias or node.id
+                for dev in devices:
+                    d = devices.get(dev)
+                    vol_id = d.volume_id
+                    status = d.status
+                    ebs_vols.append((vol_id, node_id, dev, status))
+            if ebs_vols:
                 print 'EBS volumes:'
-                for node in ebs_nodes:
-                    devices = node.attached_vols
-                    node_id = node.alias or node.id
-                    for dev in devices:
-                        d = devices.get(dev)
-                        vol_id = d.volume_id
-                        status = d.status
-                        print('    %s on %s:%s (status: %s)' %
-                              (vol_id, node_id, dev, status))
+                for vid, nid, dev, status in ebs_vols:
+                    print('    %s on %s:%s (status: %s)' %
+                          (vid, nid, dev, status))
             else:
                 print 'EBS volumes: N/A'
             spot_reqs = cl.spot_requests
@@ -565,7 +569,9 @@ class Cluster(object):
             try:
                 master = self.master_node
             except exception.MasterDoesNotExist:
-                if self.spot_requests:
+                unfulfilled_spots = [sr for sr in self.spot_requests if not
+                                     sr.instance_id]
+                if unfulfilled_spots:
                     self.wait_for_active_spots()
                     self.wait_for_active_instances()
                     master = self.master_node
@@ -674,8 +680,8 @@ class Cluster(object):
     @property
     def nodes(self):
         states = ['pending', 'running', 'stopping', 'stopped']
-        filters = {'group-name': self._security_group,
-                   'instance-state-name': states}
+        filters = {'instance-state-name': states,
+                   'instance.group-name': self._security_group}
         nodes = self.ec2.get_all_instances(filters=filters)
         # remove any cached nodes not in the current node list from EC2
         current_ids = [n.id for n in nodes]
@@ -706,7 +712,7 @@ class Cluster(object):
     def get_nodes_or_raise(self):
         nodes = self.nodes
         if not nodes:
-            filters = {'group-name': self._security_group}
+            filters = {'instance.group-name': self._security_group}
             terminated_nodes = self.ec2.get_all_instances(filters=filters)
             raise exception.NoClusterNodesFound(terminated_nodes)
         return nodes
@@ -791,13 +797,19 @@ class Cluster(object):
             spot_bid = None
         cluster_sg = self.cluster_group.name
         instance_type = instance_type or self.node_instance_type
-        if placement_group is None and instance_type in static.CLUSTER_TYPES:
-            #if placement_group is False -> leave false
-            placement_group = self.placement_group.name
-        #availability_zone is related to placement group
+        if placement_group or instance_type in static.PLACEMENT_GROUP_TYPES:
+            region = self.ec2.region.name
+            if not region in static.CLUSTER_REGIONS:
+                cluster_regions = ', '.join(static.CLUSTER_REGIONS)
+                log.warn("Placement groups are only supported in the "
+                         "following regions:\n%s" % cluster_regions)
+                log.warn("Instances will not be launched in a placement group")
+                placement_group = None
+            elif placement_group is None:
+                #if placement_group is False -> leave false
+                placement_group = self.placement_group.name
         availability_zone_group = None if placement_group is False \
             else cluster_sg
-        #launch_group is related to placement group
         launch_group = availability_zone_group
         image_id = image_id or self.node_image_id
         count = len(aliases) if not spot_bid else 1
@@ -1156,20 +1168,6 @@ class Cluster(object):
                 return False
         return True
 
-    def get_spinner(self, msg):
-        """
-        Logs a status msg, starts a spinner, and returns the spinner object.
-        This is useful for long running processes:
-
-            s = self.get_spinner("Long running process running...")
-            (do something)
-            s.stop()
-        """
-        s = spinner.Spinner()
-        log.info(msg, extra=dict(__nonewline__=True))
-        s.start()
-        return s
-
     @property
     def progress_bar(self):
         if not self._progress_bar:
@@ -1226,7 +1224,7 @@ class Cluster(object):
         """
         nodes = nodes or self.nodes
         if len(nodes) == 0:
-            s = self.get_spinner("Waiting for instances to activate...")
+            s = utils.get_spinner("Waiting for instances to activate...")
             try:
                 while len(nodes) == 0:
                     time.sleep(self.refresh_interval)
@@ -1258,7 +1256,8 @@ class Cluster(object):
         """
         log.info("Waiting for SSH to come up on all nodes...")
         nodes = nodes or self.get_nodes_or_raise()
-        self.pool.map(lambda n: n.wait(interval=self.refresh_interval), nodes)
+        self.pool.map(lambda n: n.wait(interval=self.refresh_interval), nodes,
+                      jobid_fn=lambda n: n.alias)
 
     @print_timing("Waiting for cluster to come up")
     def wait_for_cluster(self, msg="Waiting for cluster to come up..."):
@@ -1297,7 +1296,7 @@ class Cluster(object):
         Check whether all nodes are in a 'terminated' state
         """
         states = filter(lambda x: x != 'terminated', static.INSTANCE_STATES)
-        filters = {'group-name': self._security_group,
+        filters = {'instance.group-name': self._security_group,
                    'instance-state-name': states}
         insts = self.ec2.get_all_instances(filters=filters)
         return len(insts) == 0
@@ -1306,6 +1305,7 @@ class Cluster(object):
         """
         Attach each volume to the master node
         """
+        wait_for_volumes = []
         for vol in self.volumes:
             volume = self.volumes.get(vol)
             device = volume.get('device')
@@ -1323,6 +1323,8 @@ class Cluster(object):
                      (vol.id, device))
             resp = vol.attach(self.master_node.id, device)
             log.debug("resp = %s" % resp)
+            wait_for_volumes.append(vol)
+        for vol in wait_for_volumes:
             self.ec2.wait_for_volume(vol, state='attached')
 
     def detach_volumes(self):
@@ -1405,20 +1407,21 @@ class Cluster(object):
             if spot.state not in ['cancelled', 'closed']:
                 log.info("Canceling spot instance request: %s" % spot.id)
                 spot.cancel()
-        sg = self.ec2.get_group_or_none(self._security_group)
-        pg = self.ec2.get_placement_group_or_none(self._security_group)
-        s = self.get_spinner("Waiting for cluster to terminate...")
+        s = utils.get_spinner("Waiting for cluster to terminate...")
         try:
             while not self.is_cluster_terminated():
                 time.sleep(5)
         finally:
             s.stop()
-        if pg:
-            log.info("Removing %s placement group" % pg.name)
-            pg.delete()
+        region = self.ec2.region.name
+        if region in static.CLUSTER_REGIONS:
+            pg = self.ec2.get_placement_group_or_none(self._security_group)
+            if pg:
+                log.info("Removing %s placement group" % pg.name)
+                pg.delete()
+        sg = self.ec2.get_group_or_none(self._security_group)
         if sg:
-            log.info("Removing %s security group" % sg.name)
-            sg.delete()
+            self.ec2.delete_group(sg)
 
     def start(self, create=True, create_only=False, validate=True,
               validate_only=False, validate_running=False):
@@ -1879,7 +1882,7 @@ class ClusterValidator(validators.Validator):
                     from_port, to_port,
                     reason="'from_port' must be <= 'to_port'")
             cidr_ip = permission.get('cidr_ip')
-            if not iptools.validate_cidr(cidr_ip):
+            if not iptools.ipv4.validate_cidr(cidr_ip):
                 raise exception.InvalidCIDRSpecified(cidr_ip)
 
     def validate_ebs_settings(self):

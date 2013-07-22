@@ -14,9 +14,10 @@ try:
     console_scripts = ['starcluster = starcluster.cli:main']
     extra = dict(test_suite="starcluster.tests",
                  tests_require="nose",
-                 install_requires=["paramiko>=1.9.0", "boto>=2.7.0",
+                 install_requires=["paramiko>=1.10.1", "boto>=2.9.4",
                                    "workerpool>=0.9.2", "Jinja2>=2.6",
-                                   "decorator>=3.4.0", "pyasn1>=0.1.4"],
+                                   "decorator>=3.4.0", "pyasn1>=0.1.6",
+                                   "iptools>=0.6.1", "optcomplete>=1.2-devel"],
                  include_package_data=True,
                  entry_points=dict(console_scripts=console_scripts),
                  zip_safe=False)
@@ -65,7 +66,7 @@ except ImportError:
             out = [item for item in out if not fnmatchcase(item, pat)]
         return out
 
-    extra = {}
+    extra = {'scripts': ['bin/starcluster']}
 
 VERSION = 0.9999
 static = os.path.join('starcluster', 'static.py')
@@ -79,7 +80,6 @@ setup(
     packages=find_packages(),
     package_data={'starcluster.templates':
                   ['web/*.*', 'web/css/*', 'web/js/*']},
-    scripts=['bin/starcluster'],
     license='LGPL3',
     author='Justin Riley',
     author_email='justin.t.riley@gmail.com',

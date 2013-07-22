@@ -105,7 +105,7 @@ class Node(object):
                     raise exception.IncompatibleCluster(parent_cluster)
                 else:
                     raise exception.BaseException(
-                        "Error occured unbundling userdata: %s" % e)
+                        "Error occurred unbundling userdata: %s" % e)
         return self._user_data
 
     @property
@@ -145,6 +145,7 @@ class Node(object):
             mod_path, klass_name = klass.rsplit('.', 1)
             try:
                 mod = __import__(mod_path, fromlist=[klass_name])
+                plug = getattr(mod, klass_name)(*args, **kwargs)
             except SyntaxError, e:
                 raise exception.PluginSyntaxError(
                     "Plugin %s (%s) contains a syntax error at line %s" %
@@ -153,7 +154,12 @@ class Node(object):
                 raise exception.PluginLoadError(
                     "Failed to import plugin %s: %s" %
                     (klass_name, e[0]))
-            plug = getattr(mod, klass_name)(*args, **kwargs)
+            except Exception as exc:
+                log.error("Error occured:", exc_info=True)
+                raise exception.PluginLoadError(
+                    "Failed to load plugin %s with "
+                    "the following error: %s - %s" %
+                    (klass_name, exc.__class__.__name__, exc.message))
             plugs.append(plug)
         return plugs
 
@@ -305,7 +311,31 @@ class Node(object):
 
     @property
     def root_device_name(self):
-        return self.instance.root_device_name
+        root_dev = self.instance.root_device_name
+        bmap = self.block_device_mapping
+        if bmap and root_dev not in bmap and self.is_ebs_backed():
+            # Hack for misconfigured AMIs (e.g. CentOS 6.3 Marketplace) These
+            # AMIs have root device name set to /dev/sda1 but no /dev/sda1 in
+            # block device map - only /dev/sda. These AMIs somehow magically
+            # work so check if /dev/sda exists and return that instead to
+            # prevent detach_external_volumes() from trying to detach the root
+            # volume on these AMIs.
+            log.warn("Root device %s is not in the block device map" %
+                     root_dev)
+            log.warn("This means the AMI was registered with either "
+                     "an incorrect root device name or an incorrect block "
+                     "device mapping")
+            sda, sda1 = '/dev/sda', '/dev/sda1'
+            if root_dev == sda1:
+                log.info("Searching for possible root device: %s" % sda)
+                if sda in self.block_device_mapping:
+                    log.warn("Found '%s' - assuming its the real root device" %
+                             sda)
+                    root_dev = sda
+                else:
+                    log.warn("Device %s isn't in the block device map either" %
+                             sda)
+        return root_dev
 
     @property
     def root_device_type(self):
@@ -693,30 +723,36 @@ class Node(object):
     def get_device_map(self):
         """
         Returns a dictionary mapping devices->(# of blocks) based on
-        /proc/partitions
+        'fdisk -l' and /proc/partitions
         """
-        parts = self.ssh.remote_file('/proc/partitions', 'r').read()
-        r = re.compile('(\d+)\s+((?:xv|s)d[a-z])(?:\s+|\\n)')
-        devs = r.findall(parts)
+        dev_regex = '/dev/[A-Za-z0-9/]+'
+        r = re.compile('Disk (%s):' % dev_regex)
+        fdiskout = '\n'.join(self.ssh.execute("fdisk -l 2>/dev/null"))
+        proc_parts = '\n'.join(self.ssh.execute("cat /proc/partitions"))
         devmap = {}
-        for blocks, dev in devs:
-            devname = '/dev/' + dev
-            if self.ssh.path_exists(devname):
-                devmap[devname] = blocks
+        for dev in r.findall(fdiskout):
+            short_name = dev.replace('/dev/', '')
+            r = re.compile("(\d+)\s+%s(?:\s+|$)" % short_name)
+            devmap[dev] = int(r.findall(proc_parts)[0])
         return devmap
 
-    def get_partition_map(self):
+    def get_partition_map(self, device=None):
         """
         Returns a dictionary mapping partitions->(start, end, blocks, id) based
         on 'fdisk -l'
         """
-        fdiskout = '\n'.join(self.ssh.execute("fdisk -l 2>/dev/null"))
-        r = re.compile(
-            '(/dev/(?:xv|s)d[a-z][1-9][0-9]?)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)')
+        fdiskout = '\n'.join(self.ssh.execute("fdisk -l %s 2>/dev/null" %
+                                              (device or '')))
+        part_regex = '/dev/[A-Za-z0-9/]+'
+        r = re.compile('(%s)\s+\*?\s+'
+                       '(\d+)(?:[-+])?\s+'
+                       '(\d+)(?:[-+])?\s+'
+                       '(\d+)(?:[-+])?\s+'
+                       '([\da-fA-F][\da-fA-F]?)' % part_regex)
         partmap = {}
         for match in r.findall(fdiskout):
-            part, start, end, blocks, id = match
-            partmap[part] = [start, end, blocks, id]
+            part, start, end, blocks, sys_id = match
+            partmap[part] = [int(start), int(end), int(blocks), sys_id]
         return partmap
 
     def mount_device(self, device, path):
@@ -783,8 +819,9 @@ class Node(object):
         attached_vols.update(self.block_device_mapping)
         if self.is_ebs_backed():
             # exclude the root device from the list
-            if self.root_device_name in attached_vols:
-                attached_vols.pop(self.root_device_name)
+            root_dev = self.root_device_name
+            if root_dev in attached_vols:
+                attached_vols.pop(root_dev)
         return attached_vols
 
     def detach_external_volumes(self):

@@ -13,6 +13,12 @@ def __expand_all(path):
     return path
 
 
+def __expand_all_in_list(lst):
+    for i, path in enumerate(lst):
+        lst[i] = __expand_all(path)
+    return lst
+
+
 def __makedirs(path, exit_on_failure=False):
     if not os.path.exists(path):
         try:
@@ -77,6 +83,7 @@ UD_PLUGINS_FNAME = "_sc_plugins.txt"
 UD_VOLUMES_FNAME = "_sc_volumes.txt"
 UD_ALIASES_FNAME = "_sc_aliases.txt"
 
+INSTANCE_METADATA_URI = "http://169.254.169.254/latest"
 INSTANCE_STATES = ['pending', 'running', 'shutting-down',
                    'terminated', 'stopping', 'stopped']
 VOLUME_STATUS = ['creating', 'available', 'in-use',
@@ -99,6 +106,7 @@ INSTANCE_TYPES = {
     'cc1.4xlarge': ['x86_64'],
     'cc2.8xlarge': ['x86_64'],
     'cg1.4xlarge': ['x86_64'],
+    'cr1.8xlarge': ['x86_64'],
     'hi1.4xlarge': ['x86_64'],
     'hs1.8xlarge': ['x86_64'],
 }
@@ -111,15 +119,19 @@ CLUSTER_COMPUTE_TYPES = ['cc1.4xlarge', 'cc2.8xlarge']
 
 CLUSTER_GPU_TYPES = ['cg1.4xlarge']
 
-CLUSTER_TYPES = CLUSTER_COMPUTE_TYPES + CLUSTER_GPU_TYPES
+CLUSTER_HIMEM_TYPES = ['cr1.8xlarge']
 
 HI_IO_TYPES = ['hi1.4xlarge']
 
 HI_STORAGE_TYPES = ['hs1.8xlarge']
 
+CLUSTER_TYPES = CLUSTER_COMPUTE_TYPES + CLUSTER_GPU_TYPES + CLUSTER_HIMEM_TYPES
+
 HVM_TYPES = CLUSTER_TYPES + HI_IO_TYPES + HI_STORAGE_TYPES + SEC_GEN_TYPES
 
-CLUSTER_REGIONS = ['us-east-1']
+PLACEMENT_GROUP_TYPES = CLUSTER_TYPES + HI_IO_TYPES + HI_STORAGE_TYPES
+
+CLUSTER_REGIONS = ['us-east-1', 'us-west-2', 'eu-west-1']
 
 PROTOCOLS = ['tcp', 'udp', 'icmp']
 
@@ -161,6 +173,7 @@ AWS_SETTINGS = {
     'aws_proxy_port': (int, False, None, None, None),
     'aws_proxy_user': (str, False, None, None, None),
     'aws_proxy_pass': (str, False, None, None, None),
+    'aws_validate_certs': (bool, False, True, None, None),
 }
 
 KEY_SETTINGS = {
@@ -207,7 +220,7 @@ CLUSTER_SETTINGS = {
     'volumes': (list, False, [], None, None),
     'plugins': (list, False, [], None, None),
     'permissions': (list, False, [], None, None),
-    'userdata_scripts': (list, False, [], None, None),
+    'userdata_scripts': (list, False, [], None, __expand_all_in_list),
     'disable_queue': (bool, False, False, None, None),
     'force_spot_master': (bool, False, False, None, None),
     'disable_cloudinit': (bool, False, False, None, None),

@@ -47,15 +47,22 @@ called ``smallcluster`` that is set as the default *cluster template*.
 Storing the config in an alternate location
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 If you wish to store your StarCluster config in a location other than the
-default (``~/.starcluster/config``) you will need to specify the global
-``--config`` (``-c``) option with every StarCluster command you use. For
-example::
+default (``~/.starcluster/config``), you will need to set the
+``STARCLUSTER_CONFIG`` environment variable to point to your file::
+
+    $ export STARCLUSTER_CONFIG="/path/to/starcluster/config"
+
+After doing so, all StarCluster commands will use the config identified by
+``STARCLUSTER_CONFIG``.
+
+Alternatively, you can specify the global ``--config`` (``-c``) option with
+every StarCluster command you use. For example::
 
     $ starcluster -c /path/to/starcluster/config listclusters
 
-In the above example, if the config didn't exist at the specified path you
-would be prompted with the same menu above offering to generate a template at
-the specified path::
+In either case, if the config didn't exist at the specified path you would be
+prompted with the same menu above offering to generate a template at the
+specified path::
 
     $ starcluster -c /path/to/nonexistent/config listclusters
     StarCluster - (http://star.mit.edu/cluster)
@@ -100,6 +107,16 @@ required:
     aws_user_id= #your userid
     ec2_cert = /path/to/your/ec2_cert.pem
     ec2_private_key = /path/to/your/ec2_pk.pem
+
+All of the settings in the **[aws info]** section can be overridden by the
+environment. StarCluster will log a warning whenever it uses settings from the
+environment. For example::
+
+   $ export AWS_ACCESS_KEY_ID=your_aws_access_key_id
+   $ export AWS_SECRET_ACCESS_KEY=your_secret_access_key
+   $ starcluster listclusters
+   *** WARNING - Setting 'AWS_SECRET_ACCESS_KEY' from environment...
+   *** WARNING - Setting 'AWS_ACCESS_KEY_ID' from environment...
 
 Amazon EC2 Regions
 ------------------
