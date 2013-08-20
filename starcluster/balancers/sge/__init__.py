@@ -20,7 +20,6 @@ import re
 import time
 import datetime
 import xml.dom.minidom
-import re
 import traceback
 
 from starcluster import utils
@@ -513,7 +512,7 @@ class SGELoadBalancer(LoadBalancer):
         and returns a datetime object with the master's time
         instead of fetching it from local machine, maybe inaccurate.
         """
-        str = '\n'.join(self._cluster.master_node.ssh.execute('date'))
+        str = '\n'.join(self._cluster.master_node.ssh.execute('date --utc'))
         return datetime.datetime.strptime(str, "%a %b %d %H:%M:%S UTC %Y")
 
     def get_qatime(self, now):
