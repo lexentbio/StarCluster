@@ -94,3 +94,6 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
                            + ",da_slots="\
                            + str(node.num_processors)\
                            + ",da_exclusive=1 " + node.alias)
+
+    def recover(self, nodes, master, user, user_shell, volumes):
+        pass

@@ -71,3 +71,6 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
 
     def clean_cluster(self, nodes, master, user, user_shell, volumes):
         pass
+
+    def recover(self, nodes, master, user, user_shell, volumes):
+        pass
