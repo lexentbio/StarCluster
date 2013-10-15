@@ -66,6 +66,21 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
         else:
             log.error("/root/" + self.mount + " is already mounted")
 
+        if node.ssh.execute("mount | grep home | wc -l")[0] == "0":
+            log.info("Mounting /home from master")
+            node.ssh.execute("sshfs -o allow_other -C -o workaround=all "
+                             "-o reconnect -o sshfs_sync -o nonempty "
+                             "master:/home /home")
+        else:
+            log.error("/home is already mounted")
+
+        if node.ssh.execute("test -f /home/useradd.sh")[0] == "0":
+            log.info("Creating users from /home/useradd.sh")
+            node.ssh.execute("/home/useradd.sh")
+        else:
+            log.error("No useradd.sh script found")
+
+
     def on_remove_node(self, node, nodes, master, user, user_shell, volumes):
         pass
 
