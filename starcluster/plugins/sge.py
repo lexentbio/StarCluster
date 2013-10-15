@@ -194,7 +194,6 @@ class SGEPlugin(clustersetup.DefaultClusterSetup):
     def recover(self, nodes, master, user, user_shell, volumes):
         cmd = "ps -ef | grep sge_qmaster | grep -v grep | wc -l"
         rez = int(master.ssh.execute(cmd)[0])
-        log.info(rez)
         if rez == 0:
             log.error("sge_qmaster is down")
             cmd = "cd /opt/sge6/bin/linux-x64/ && ./sge_qmaster"
@@ -251,7 +250,7 @@ class SGEPlugin(clustersetup.DefaultClusterSetup):
 
         #DEBUGIN stuck qrsh issue (BLUK-63)
         ps_wc = int(self._master.ssh.execute("ps -ef | grep qrsh | wc -l")[0])
-        qstat_wc = int(self._master.ssh.execute("qstat | wc -l")[0])
+        qstat_wc = int(self._master.ssh.execute("qstat -u \"*\" | wc -l")[0])
         if qstat_wc == 0 and ps_wc > 2:
             log.error("LOST QRSH??")
             from datetime import datetime
