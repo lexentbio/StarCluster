@@ -45,10 +45,12 @@ class ImageCreator(object):
         self.ec2 = easy_ec2
         self.host = self.ec2.get_instance(instance_id)
         if self.host.state != 'running':
-            raise exception.InstanceNotRunning(self.host.id, self.host.state,
-                                               self.host.dns_name)
-        self.host_ssh = sshutils.SSHClient(self.host.dns_name, username='root',
-                                           private_key=key_location)
+            raise exception.InstanceNotRunning(
+                self.host.id, self.host.state,
+                self.host.dns_name or self.host.private_ip_address)
+        self.host_ssh = sshutils.SSHClient(
+            self.host.dns_name or self.host.private_ip_address,
+            username='root', private_key=key_location)
         self.description = description
         self.kernel_id = kernel_id or self.host.kernel
         self.ramdisk_id = ramdisk_id or self.host.ramdisk
@@ -119,6 +121,7 @@ class S3ImageCreator(ImageCreator):
             'bucket': self.bucket,
             'prefix': self.prefix,
             'arch': self.host.architecture,
+            'bmap': self._instance_store_bmap_str()
         }
 
     def __repr__(self):
@@ -151,6 +154,13 @@ class S3ImageCreator(ImageCreator):
         conn.put(self.private_key, pkey_dest)
         conn.put(self.cert, cert_dest)
 
+    def _instance_store_bmap_str(self):
+        bmap = self.ec2.create_block_device_map(add_ephemeral_drives=True,
+                                                instance_store=True)
+        bmaps = ','.join(["%s=%s" % (t.ephemeral_name, d)
+                          for d, t in bmap.items()])
+        return ','.join(['ami=sda1', bmaps])
+
     @print_timing
     def _bundle_image(self):
         # run script to prepare the host
@@ -161,7 +171,8 @@ class S3ImageCreator(ImageCreator):
         log.info('Creating the bundled image: (please be patient)')
         conn.execute('ec2-bundle-vol -d /mnt -k /mnt/%(private_key)s '
                      '-c /mnt/%(cert)s -p %(prefix)s -u %(userid)s '
-                     '-r %(arch)s -e /root/.ssh' % config_dict, silent=False)
+                     '-r %(arch)s -e /root/.ssh -B %(bmap)s' % config_dict,
+                     silent=False)
         self._cleanup_pem_files()
 
     @print_timing
