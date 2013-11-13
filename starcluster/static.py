@@ -85,15 +85,15 @@ BASE_AMI_32 = "ami-7c5c3915"
 BASE_AMI_64 = "ami-765b3e1f"
 BASE_AMI_HVM = "ami-52a0c53b"
 
-SECURITY_GROUP_PREFIX = "@sc"
-SECURITY_GROUP_TEMPLATE = '-'.join([SECURITY_GROUP_PREFIX, "%s"])
+SECURITY_GROUP_PREFIX = "@sc-"
+SECURITY_GROUP_TEMPLATE = SECURITY_GROUP_PREFIX + "%s"
 VOLUME_GROUP_NAME = "volumecreator"
-VOLUME_GROUP = SECURITY_GROUP_TEMPLATE % VOLUME_GROUP_NAME
+VOLUME_GROUP = SECURITY_GROUP_PREFIX + VOLUME_GROUP_NAME
 
 # Cluster group tag keys
-VERSION_TAG = '-'.join([SECURITY_GROUP_PREFIX, 'version'])
-CORE_TAG = '-'.join([SECURITY_GROUP_PREFIX, 'core'])
-USER_TAG = '-'.join([SECURITY_GROUP_PREFIX, 'user'])
+VERSION_TAG = SECURITY_GROUP_PREFIX + 'version'
+CORE_TAG = SECURITY_GROUP_PREFIX + 'core'
+USER_TAG = SECURITY_GROUP_PREFIX + 'user'
 
 # Internal StarCluster userdata filenames
 UD_PLUGINS_FNAME = "_sc_plugins.txt"
@@ -123,6 +123,7 @@ INSTANCE_TYPES = {
     'cc1.4xlarge': ['x86_64'],
     'cc2.8xlarge': ['x86_64'],
     'cg1.4xlarge': ['x86_64'],
+    'g2.2xlarge': ['x86_64'],
     'cr1.8xlarge': ['x86_64'],
     'hi1.4xlarge': ['x86_64'],
     'hs1.8xlarge': ['x86_64'],
@@ -134,7 +135,7 @@ SEC_GEN_TYPES = ['m3.xlarge', 'm3.2xlarge']
 
 CLUSTER_COMPUTE_TYPES = ['cc1.4xlarge', 'cc2.8xlarge']
 
-CLUSTER_GPU_TYPES = ['cg1.4xlarge']
+CLUSTER_GPU_TYPES = ['g2.2xlarge', 'cg1.4xlarge']
 
 CLUSTER_HIMEM_TYPES = ['cr1.8xlarge']
 
@@ -177,8 +178,8 @@ AWS_SETTINGS = {
     'aws_access_key_id': (str, True, None, None, None),
     'aws_secret_access_key': (str, True, None, None, None),
     'aws_user_id': (str, False, None, None, None),
-    'ec2_cert': (str, False, None, None, None),
-    'ec2_private_key': (str, False, None, None, None),
+    'ec2_cert': (str, False, None, None, __expand_all),
+    'ec2_private_key': (str, False, None, None, __expand_all),
     'aws_port': (int, False, None, None, None),
     'aws_ec2_path': (str, False, '/', None, None),
     'aws_s3_path': (str, False, '/', None, None),
@@ -227,6 +228,8 @@ CLUSTER_SETTINGS = {
     'cluster_size': (int, True, None, None, None),
     'cluster_user': (str, False, 'sgeadmin', None, None),
     'cluster_shell': (str, False, 'bash', AVAILABLE_SHELLS.keys(), None),
+    'vpc_id': (str, False, None, None, None),
+    'subnet_id': (str, False, None, None, None),
     'master_image_id': (str, False, None, None, None),
     'master_instance_type': (str, False, None, INSTANCE_TYPES.keys(), None),
     'node_image_id': (str, True, None, None, None),
@@ -241,4 +244,5 @@ CLUSTER_SETTINGS = {
     'disable_queue': (bool, False, False, None, None),
     'force_spot_master': (bool, False, False, None, None),
     'disable_cloudinit': (bool, False, False, None, None),
+    'dns_prefix': (bool, False, False, None, None),
 }

@@ -88,8 +88,9 @@ class Node(object):
     """
     def __init__(self, instance, key_location, alias=None, user='root'):
         self.instance = instance
-        self.ec2 = awsutils.EasyEC2(None, None)
-        self.ec2._conn = instance.connection
+        self.ec2 = awsutils.EasyEC2(instance.connection.aws_access_key_id,
+                                    instance.connection.aws_secret_access_key,
+                                    connection=instance.connection)
         self.key_location = key_location
         self.user = user
         self._alias = alias
@@ -524,8 +525,8 @@ class Node(object):
             log.debug("Using existing key: %s" % private_key)
             key = self.ssh.load_remote_rsa_key(private_key)
         else:
-            key = self.ssh.generate_rsa_key()
-        pubkey_contents = self.ssh.get_public_key(key)
+            key = sshutils.generate_rsa_key()
+        pubkey_contents = sshutils.get_public_key(key)
         if not key_exists or ignore_existing:
             # copy public key to remote machine
             pub_key = self.ssh.remote_file(public_key, 'w')
@@ -556,7 +557,7 @@ class Node(object):
             # add public key used to create the connection to user's
             # authorized_keys
             conn_key = self.ssh._pkey
-            conn_pubkey_contents = self.ssh.get_public_key(conn_key)
+            conn_pubkey_contents = sshutils.get_public_key(conn_key)
             if conn_pubkey_contents not in auth_keys_contents:
                 log.debug("adding conn_pubkey_contents")
                 auth_keys.write('%s\n' % conn_pubkey_contents)
@@ -842,7 +843,16 @@ class Node(object):
         hostname_file = self.ssh.remote_file("/etc/hostname", "w")
         hostname_file.write(hostname)
         hostname_file.close()
-        self.ssh.execute('hostname -F /etc/hostname')
+        try:
+            self.ssh.execute('hostname -F /etc/hostname')
+        except:
+            if not utils.is_valid_hostname(hostname):
+                raise exception.InvalidHostname(
+                    "Please terminate and recreate this cluster with a name"
+                    " that is also a valid hostname.  This hostname is"
+                    " invalid: %s" % hostname)
+            else:
+                raise
 
     @property
     def network_names(self):
@@ -908,7 +918,8 @@ class Node(object):
             return spot[0]
 
     def is_master(self):
-        return self.alias == "master"
+        return str(self._alias) == 'master' \
+            or str(self._alias).endswith("-master")
 
     def is_instance_store(self):
         return self.instance.root_device_type == "instance-store"
@@ -1101,9 +1112,20 @@ class Node(object):
         return self.state
 
     @property
+    def addr(self):
+        if self.instance.vpc_id:
+            #if instance has an elastic ip
+            if self.instance.ip_address:
+                return self.instance.ip_address
+            else:
+                return self.instance.private_ip_address
+        else:
+            return self.instance.dns_name
+
+    @property
     def ssh(self):
         if not self._ssh:
-            self._ssh = sshutils.SSHClient(self.instance.dns_name,
+            self._ssh = sshutils.SSHClient(self.addr,
                                            username=self.user,
                                            private_key=self.key_location)
         return self._ssh
@@ -1137,8 +1159,11 @@ class Node(object):
                 sshopts += ' -Y'
             if forward_agent:
                 sshopts += ' -A'
+            addr = self.dns_name
+            if self.instance.vpc_id:
+                addr = self.private_ip_address
             ssh_cmd = static.SSH_TEMPLATE % dict(opts=sshopts, user=user,
-                                                 host=self.dns_name)
+                                                 host=addr)
             if command:
                 command = "'source /etc/profile && %s'" % command
                 ssh_cmd = ' '.join([ssh_cmd, command])
@@ -1209,7 +1234,7 @@ class Node(object):
         /usr/bin/apt exists on the node, and use apt if it exists. Otherwise
         test to see if /usr/bin/yum exists and use that.
         """
-        if self.ssh.isfile('/usr/bin/apt'):
+        if self.ssh.isfile('/usr/bin/apt-get'):
             return "apt"
         elif self.ssh.isfile('/usr/bin/yum'):
             return "yum"
