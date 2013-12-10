@@ -45,20 +45,19 @@ class CmdSshMaster(ClusterCompleter):
         parser.add_option("-A", "--forward-agent", dest="forward_agent",
                           action="store_true", default=False,
                           help="enable authentication agent forwarding")
-        parser.add_option("-P", "--dns-prefix", action="store_true",
-                          help=("Let starcluster know that the master's dns"
-                                " name starts with the tag name.  ie: "
-                                " mycluster-master."))
+        parser.add_option("-t", "--pseudo-tty", dest="pseudo_tty",
+                          action="store_true", default=False,
+                          help="enable pseudo-tty allocation (for interactive "
+                          "commands and screens)")
 
     def execute(self, args):
         if not args:
             self.parser.error("please specify a cluster")
         clname = args[0]
         cmd = ' '.join(args[1:])
-        retval = self.cm.ssh_to_master(clname,
-                                       dns_prefix=self.opts.dns_prefix,
-                                       user=self.opts.user,
+        retval = self.cm.ssh_to_master(clname, user=self.opts.user,
                                        command=cmd,
+                                       pseudo_tty=self.opts.pseudo_tty,
                                        forward_x11=self.opts.forward_x11,
                                        forward_agent=self.opts.forward_agent)
         if cmd and retval is not None:

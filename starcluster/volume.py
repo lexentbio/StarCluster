@@ -272,8 +272,9 @@ class VolumeCreator(cluster.Cluster):
         newvol = self._volume
         if newvol:
             log.error("Detaching and deleting *new* volume: %s" % newvol.id)
-            newvol.detach(force=True)
-            self.ec2.wait_for_volume(newvol, status='available')
+            if newvol.update() != 'available':
+                newvol.detach(force=True)
+                self.ec2.wait_for_volume(newvol, status='available')
             newvol.delete()
             self._volume = None
 
@@ -304,7 +305,7 @@ class VolumeCreator(cluster.Cluster):
                      (volume_size, vol.id))
             return vol
         except Exception:
-            log.error("Failed to create new volume")
+            log.error("Failed to create new volume", exc_info=True)
             self._delete_new_volume()
             raise
         finally:

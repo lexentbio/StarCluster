@@ -29,6 +29,7 @@ import warnings
 import posixpath
 import tempfile
 
+import scp
 import paramiko
 from Crypto.PublicKey import RSA
 from Crypto.PublicKey import DSA
@@ -41,7 +42,6 @@ try:
 except ImportError:
     HAS_TERMIOS = False
 
-from starcluster.sshutils import scp
 from starcluster import exception
 from starcluster import progressbar
 from starcluster.logger import log
@@ -61,10 +61,11 @@ class SSHClient(object):
                  password=None,
                  private_key=None,
                  private_key_pass=None,
+                 compress=False,
                  port=22,
                  timeout=30):
         self._host = host
-        self._port = 22
+        self._port = port
         self._pkey = None
         self._username = username or os.environ['LOGNAME']
         self._password = password
@@ -73,6 +74,7 @@ class SSHClient(object):
         self._scp = None
         self._transport = None
         self._progress_bar = None
+        self._compress = compress
         if private_key:
             self._pkey = self.load_private_key(private_key, private_key_pass)
         elif not password:
@@ -97,10 +99,13 @@ class SSHClient(object):
         return pkey
 
     def connect(self, host=None, username=None, password=None,
-                private_key=None, private_key_pass=None, port=22, timeout=30):
+                private_key=None, private_key_pass=None, port=None, timeout=30,
+                compress=None):
         host = host or self._host
         username = username or self._username
         password = password or self._password
+        compress = compress or self._compress
+        port = port if port is not None else self._port
         pkey = self._pkey
         if private_key:
             pkey = self.load_private_key(private_key, private_key_pass)
@@ -112,6 +117,8 @@ class SSHClient(object):
             transport.banner_timeout = timeout
         except socket.error:
             raise exception.SSHConnectionError(host, port)
+        # Enable/disable compression
+        transport.use_compression(compress)
         # Authenticate the transport.
         try:
             transport.connect(username=username, pkey=pkey, password=password)
@@ -144,7 +151,8 @@ class SSHClient(object):
         """
         if not self._transport or not self._transport.is_active():
             self.connect(self._host, self._username, self._password,
-                         port=self._port, timeout=self._timeout)
+                         port=self._port, timeout=self._timeout,
+                         compress=self._compress)
         return self._transport
 
     def get_server_public_key(self):
@@ -451,7 +459,13 @@ class SSHClient(object):
             if self.isdir(rpath):
                 recursive = True
                 break
-        self.scp.get(remotepaths, localpath, recursive=recursive)
+        try:
+            self.scp.get(remotepaths, local_path=localpath,
+                         recursive=recursive)
+        except Exception, e:
+            log.debug("get failed: remotepaths=%s, localpath=%s",
+                      str(remotepaths), localpath)
+            raise exception.SCPException(str(e))
 
     def put(self, localpaths, remotepath='.'):
         """
@@ -463,7 +477,13 @@ class SSHClient(object):
             if os.path.isdir(lpath):
                 recursive = True
                 break
-        self.scp.put(localpaths, remote_path=remotepath, recursive=recursive)
+        try:
+            self.scp.put(localpaths, remote_path=remotepath,
+                         recursive=recursive)
+        except Exception, e:
+            log.debug("put failed: localpaths=%s, remotepath=%s",
+                      str(localpaths), remotepath)
+            raise exception.SCPException(str(e))
 
     def execute_async(self, command, source_profile=True):
         """

@@ -110,14 +110,14 @@ CLUSTER_SHELL = bash
 # The base i386 StarCluster AMI is %(x86_ami)s
 # The base x86_64 StarCluster AMI is %(x86_64_ami)s
 # The base HVM StarCluster AMI is %(hvm_ami)s
-NODE_IMAGE_ID = %(x86_ami)s
+NODE_IMAGE_ID = %(x86_64_ami)s
 # instance type for all cluster nodes
 # (options: %(instance_types)s)
 NODE_INSTANCE_TYPE = m1.small
 
-#Optional vpc id if cluster should run in a vpc
+# Launch cluster in a VPC (OPTIONAL)
 #VPC_ID=vpc-6b1fe402
-#Optional the subnet to use for the vpc
+# The subnet to use for the VPC (required if VPC_ID is set)
 #SUBNET_ID=subnet-6a1fe403
 # Uncomment to disable installing/configuring a queueing system on the
 # cluster (SGE)
@@ -127,7 +127,7 @@ NODE_INSTANCE_TYPE = m1.small
 #MASTER_INSTANCE_TYPE = m1.small
 # Uncomment to specify a separate AMI to use for the master node. (OPTIONAL)
 # (defaults to NODE_IMAGE_ID if not specified)
-#MASTER_IMAGE_ID = %(x86_ami)s (OPTIONAL)
+#MASTER_IMAGE_ID = %(x86_64_ami)s (OPTIONAL)
 # availability zone to launch the cluster in (OPTIONAL)
 # (automatically determined based on volumes (if any) or
 # selected by Amazon if not specified)

@@ -143,7 +143,7 @@ class Node(object):
         if not self._alias:
             alias = self.tags.get('alias')
             if not alias:
-                aliasestxt = self.user_data.get(static.UD_ALIASES_FNAME)
+                aliasestxt = self.user_data.get(static.UD_ALIASES_FNAME, '')
                 aliases = aliasestxt.splitlines()[2:]
                 index = self.ami_launch_index
                 try:
@@ -350,6 +350,14 @@ class Node(object):
     @property
     def region(self):
         return self.instance.region
+
+    @property
+    def vpc_id(self):
+        return self.instance.vpc_id
+
+    @property
+    def subnet_id(self):
+        return self.instance.subnet_id
 
     @property
     def root_device_name(self):
@@ -682,7 +690,8 @@ class Node(object):
         $ node.export_fs_to_nodes(nodes=[node1,node2],
                                   export_paths=['/home', '/opt/sge6'])
         """
-        # setup /etc/exports
+        log.debug("Cleaning up potentially stale NFS entries")
+        self.stop_exporting_fs_to_nodes(nodes, paths=export_paths)
         log.info("Configuring NFS exports path(s):\n%s" %
                  ' '.join(export_paths))
         nfs_export_settings = "(async,no_root_squash,no_subtree_check,rw)"
@@ -699,7 +708,7 @@ class Node(object):
         etc_exports.close()
         self.ssh.execute('exportfs -fra')
 
-    def stop_exporting_fs_to_nodes(self, nodes):
+    def stop_exporting_fs_to_nodes(self, nodes, paths=None):
         """
         Removes nodes from this node's /etc/exportfs
 
@@ -708,17 +717,21 @@ class Node(object):
         Example:
         $ node.remove_export_fs_to_nodes(nodes=[node1,node2])
         """
-        regex = '|'.join(map(lambda x: x.alias, nodes))
+        if paths:
+            regex = '|'.join([' '.join([path, node.alias]) for path in paths
+                              for node in nodes])
+        else:
+            regex = '|'.join([n.alias for n in nodes])
         self.ssh.remove_lines_from_file('/etc/exports', regex)
         self.ssh.execute('exportfs -fra')
 
     def start_nfs_server(self):
         log.info("Starting NFS server on %s" % self.alias)
-        self.ssh.execute('/etc/init.d/portmap start')
+        self.ssh.execute('/etc/init.d/portmap start', ignore_exit_status=True)
         self.ssh.execute('mount -t rpc_pipefs sunrpc /var/lib/nfs/rpc_pipefs/',
                          ignore_exit_status=True)
         self.ssh.execute('/etc/init.d/nfs start')
-        self.ssh.execute('/usr/sbin/exportfs -fra')
+        self.ssh.execute('exportfs -fra')
 
     def mount_nfs_shares(self, server_node, remote_paths):
         """
@@ -918,8 +931,7 @@ class Node(object):
             return spot[0]
 
     def is_master(self):
-        return str(self._alias) == 'master' \
-            or str(self._alias).endswith("-master")
+        return self.alias == 'master' or self.alias.endswith("-master")
 
     def is_instance_store(self):
         return self.instance.root_device_type == "instance-store"
@@ -1113,14 +1125,19 @@ class Node(object):
 
     @property
     def addr(self):
-        if self.instance.vpc_id:
-            #if instance has an elastic ip
-            if self.instance.ip_address:
-                return self.instance.ip_address
+        """
+        Returns the most widely accessible address for the instance. This
+        property first checks if dns_name is available, then the public ip, and
+        finally the private ip. If none of these addresses are available it
+        returns None.
+        """
+        if not self.dns_name:
+            if self.ip_address:
+                return self.ip_address
             else:
-                return self.instance.private_ip_address
+                return self.private_ip_address
         else:
-            return self.instance.dns_name
+            return self.dns_name or None
 
     @property
     def ssh(self):
@@ -1131,7 +1148,7 @@ class Node(object):
         return self._ssh
 
     def shell(self, user=None, forward_x11=False, forward_agent=False,
-              command=None):
+              pseudo_tty=False, command=None):
         """
         Attempts to launch an interactive shell by first trying the system's
         ssh client. If the system does not have the ssh command it falls back
@@ -1159,11 +1176,10 @@ class Node(object):
                 sshopts += ' -Y'
             if forward_agent:
                 sshopts += ' -A'
-            addr = self.dns_name
-            if self.instance.vpc_id:
-                addr = self.private_ip_address
+            if pseudo_tty:
+                sshopts += ' -t'
             ssh_cmd = static.SSH_TEMPLATE % dict(opts=sshopts, user=user,
-                                                 host=addr)
+                                                 host=self.addr)
             if command:
                 command = "'source /etc/profile && %s'" % command
                 ssh_cmd = ' '.join([ssh_cmd, command])
@@ -1175,6 +1191,9 @@ class Node(object):
                 log.warn("X11 Forwarding not available in Python SSH client")
             if forward_agent:
                 log.warn("Authentication agent forwarding not available in " +
+                         "Python SSH client")
+            if pseudo_tty:
+                log.warn("Pseudo-tty allocation is not available in " +
                          "Python SSH client")
             if command:
                 orig_user = self.ssh.get_current_user()
@@ -1207,6 +1226,7 @@ class Node(object):
         pkgs is a string that contains one or more packages separated by a
         space
         """
+        self.apt_command('update')
         self.apt_command('install %s' % pkgs)
 
     def yum_command(self, cmd):

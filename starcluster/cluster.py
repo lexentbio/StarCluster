@@ -61,16 +61,8 @@ class ClusterManager(managers.Manager):
             cltag = self.get_tag_from_sg(clname)
             if not group:
                 group = self.ec2.get_security_group(clname)
-
-            default_template = self.cfg.get_default_cluster_template()
-            cl = self.cfg.get_cluster_template(default_template, cltag,
-                                               self.ec2)
-            if not isinstance(cl, Cluster):
-                raise NotImplementedError(
-                    "This ClusterManager and its config are incompatible: "
-                    " config.get_cluster_template returned an instance that"
-                    " wasn't a Cluster object.  This is a bug!")
-
+            cl = Cluster(ec2_conn=self.ec2, cluster_tag=cltag,
+                         cluster_group=group)
             if load_receipt:
                 cl.load_receipt(load_plugins=load_plugins,
                                 load_volumes=load_volumes)
@@ -133,8 +125,9 @@ class ClusterManager(managers.Manager):
         """
         return self.get_cluster_or_none(tag_name) is not None
 
-    def ssh_to_master(self, cluster_name, dns_prefix, user='root',
-                      command=None, forward_x11=False, forward_agent=False):
+    def ssh_to_master(self, cluster_name, user='root', command=None,
+                      forward_x11=False, forward_agent=False,
+                      pseudo_tty=False):
         """
         ssh to master node of cluster_name
 
@@ -142,15 +135,14 @@ class ClusterManager(managers.Manager):
         """
         cluster = self.get_cluster(cluster_name, load_receipt=False,
                                    require_keys=True)
-        if dns_prefix:
-            cluster.dns_prefix = cluster_name
         return cluster.ssh_to_master(user=user, command=command,
                                      forward_x11=forward_x11,
-                                     forward_agent=forward_agent)
+                                     forward_agent=forward_agent,
+                                     pseudo_tty=pseudo_tty)
 
     def ssh_to_cluster_node(self, cluster_name, node_id, user='root',
                             command=None, forward_x11=False,
-                            forward_agent=False):
+                            forward_agent=False, pseudo_tty=False):
         """
         ssh to a node in cluster_name that has either an id,
         dns name, or alias matching node_id
@@ -165,7 +157,8 @@ class ClusterManager(managers.Manager):
         cluster.keyname = node.key_name
         cluster.validator.validate_keypair()
         return node.shell(user=user, forward_x11=forward_x11,
-                          forward_agent=forward_agent, command=command)
+                          forward_agent=forward_agent,
+                          pseudo_tty=pseudo_tty, command=command)
 
     def _get_cluster_name(self, cluster_name):
         """
@@ -175,15 +168,11 @@ class ClusterManager(managers.Manager):
             cluster_name = static.SECURITY_GROUP_TEMPLATE % cluster_name
         return cluster_name
 
-    def add_node(self, cluster_name, dns_prefix, alias=None, no_create=False,
+    def add_node(self, cluster_name, alias=None, no_create=False,
                  image_id=None, instance_type=None, zone=None,
-                 placement_group=None, spot_bid=None, template=None,
-                 reboot_interval=10, n_reboot_restart=False):
-        if not template:
-            template = self.get_default_cluster_template()
-        cl = self.get_cluster_template(template, cluster_name)
-        if dns_prefix:
-            cl.dns_prefix = cluster_name
+                 placement_group=None, spot_bid=None, reboot_interval=10,
+                 n_reboot_restart=False):
+        cl = self.get_cluster(cluster_name)
         return cl.add_node(alias=alias, image_id=image_id,
                            instance_type=instance_type, zone=zone,
                            placement_group=placement_group, spot_bid=spot_bid,
@@ -191,19 +180,14 @@ class ClusterManager(managers.Manager):
                            reboot_interval=reboot_interval,
                            n_reboot_restart=n_reboot_restart)
 
-    def add_nodes(self, cluster_name, num_nodes, dns_prefix, aliases=None,
-                  no_create=False,
+    def add_nodes(self, cluster_name, num_nodes, aliases=None, no_create=False,
                   image_id=None, instance_type=None, zone=None,
-                  placement_group=None, spot_bid=None, template=None,
-                  reboot_interval=10, n_reboot_restart=False):
+                  placement_group=None, spot_bid=None, reboot_interval=10,
+                  n_reboot_restart=False):
         """
         Add one or more nodes to cluster
         """
-        if not template:
-            template = self.get_default_cluster_template()
-        cl = self.get_cluster_template(template, cluster_name)
-        if dns_prefix:
-            cl.dns_prefix = cluster_name
+        cl = self.get_cluster(cluster_name)
         return cl.add_nodes(num_nodes, aliases=aliases, image_id=image_id,
                             instance_type=instance_type, zone=zone,
                             placement_group=placement_group, spot_bid=spot_bid,
@@ -211,14 +195,11 @@ class ClusterManager(managers.Manager):
                             reboot_interval=reboot_interval,
                             n_reboot_restart=n_reboot_restart)
 
-    def remove_node(self, cluster_name, alias, terminate=True, template=None,
-                    force=False):
+    def remove_node(self, cluster_name, alias, terminate=True, force=False):
         """
         Remove a single node from a cluster
         """
-        if not template:
-            template = self.get_default_cluster_template()
-        cl = self.get_cluster_template(template, cluster_name)
+        cl = self.get_cluster(cluster_name)
         n = cl.get_node_by_alias(alias)
         if not n:
             raise exception.InstanceDoesNotExist(alias, label='node')
@@ -367,7 +348,7 @@ class ClusterManager(managers.Manager):
                 print 'Cluster nodes:'
                 for node in nodes:
                     nodeline = "    %7s %s %s %s" % (node.alias, node.state,
-                                                     node.id, node.dns_name)
+                                                     node.id, node.addr or '')
                     if node.spot_id:
                         nodeline += ' (spot %s)' % node.spot_id
                     if show_ssh_status:
@@ -456,6 +437,12 @@ class Cluster(object):
         self.plugins = self.load_plugins(plugins)
         self.userdata_scripts = userdata_scripts or []
         self.dns_prefix = dns_prefix and cluster_tag
+        self.refresh_interval = refresh_interval
+        self.disable_queue = disable_queue
+        self.num_threads = num_threads
+        self.disable_threads = disable_threads
+        self.force_spot_master = force_spot_master
+        self.disable_cloudinit = disable_cloudinit
         self.plugins_order = plugins_order
 
         self._cluster_group = None
@@ -475,7 +462,7 @@ class Cluster(object):
 
     @property
     def zone(self):
-        if not self._zone and self.availability_zone or self.volumes:
+        if not self._zone:
             self._zone = self._get_cluster_zone()
         return self._zone
 
@@ -506,6 +493,11 @@ class Cluster(object):
             raise exception.InvalidZone(zone.name, common_zone)
         if not zone and common_zone:
             zone = self.ec2.get_zone(common_zone)
+        if not zone:
+            try:
+                zone = self.ec2.get_zone(self.master_node.placement)
+            except exception.MasterDoesNotExist:
+                pass
         return zone
 
     @property
@@ -737,6 +729,9 @@ class Cluster(object):
                  master_instance_type=self.master_instance_type,
                  node_image_id=self.node_image_id,
                  node_instance_type=self.node_instance_type,
+                 availability_zone=self.availability_zone,
+                 dns_prefix=self.dns_prefix,
+                 subnet_id=self.subnet_id,
                  disable_queue=self.disable_queue,
                  disable_cloudinit=self.disable_cloudinit),
             use_json=True)
@@ -942,6 +937,9 @@ class Cluster(object):
                 placement_group = self.placement_group.name
         availability_zone_group = None if placement_group is False \
             else cluster_sg
+        if zone is None and placement_group is not False:
+                zone = getattr(self.zone, 'name', None)
+
         #launch_group is related to placement group
         launch_group = availability_zone_group
         image_id = image_id or self.node_image_id
@@ -952,15 +950,15 @@ class Cluster(object):
                       key_name=self.keyname, security_groups=[cluster_sg],
                       availability_zone_group=availability_zone_group,
                       launch_group=launch_group,
-                      placement=zone or getattr(self.zone, 'name', None),
+                      placement=zone,
                       user_data=user_data,
                       placement_group=placement_group,
-                      subnet_id=getattr(self, 'subnet_id', None))
+                      subnet_id=self.subnet_id)
         resvs = []
         if spot_bid:
+            security_group_id = self.cluster_group.id
             for alias in aliases:
-                sg = self.ec2.get_security_group(self._security_group)
-                kwargs['security_group_ids'] = [sg.id]
+                kwargs['security_group_ids'] = [security_group_id]
                 kwargs['user_data'] = self._get_cluster_userdata([alias])
                 resvs.extend(self.ec2.request_instances(image_id, **kwargs))
         else:
@@ -1092,11 +1090,11 @@ class Cluster(object):
             if node.is_master():
                 raise exception.InvalidOperation("cannot remove master node")
             try:
-                self.run_plugins(method_name="on_remove_node", node=node,
-                                 reverse=True)
+                self.run_plugins(method_name="on_remove_node",
+                                 node=node, reverse=True)
             except:
-                if not force:
-                    raise
+                #will still allow node termination
+                pass
             if not terminate:
                 continue
             node.terminate()
@@ -1621,42 +1619,10 @@ class Cluster(object):
         if region in static.CLUSTER_REGIONS:
             pg = self.ec2.get_placement_group_or_none(self._security_group)
             if pg:
-                log.info("Removing %s placement group" % pg.name)
-                pg.delete()
-                while self.ec2.get_placement_group_or_none(
-                        self._security_group):
-                    log.info("Waiting for deletion of security group %s..."
-                             % pg.name)
-                    time.sleep(3)
+                self.ec2.delete_group(pg)
         sg = self.ec2.get_group_or_none(self._security_group)
         if sg:
-            log.info("Removing %s security group" % sg.name)
-            if self.cluster_group.vpc_id:
-                log.info(
-                    "In VPC, AWS is slow to unregister dependencies to"
-                    " security groups.  Let's wait up to a few mins..."
-                    " If this fails, you may need to delete rules that link"
-                    " this security group and some other security group you"
-                    " have.")
-                pbar = self.progress_bar.reset()
-                pbar.maxval = 50
-                for nth_try in range(50):
-                    pbar.update(nth_try)
-                    try:
-                        self.ec2.conn.delete_security_group(group_id=sg.id)
-                        break
-                    except:
-                        if nth_try == 49:
-                            raise
-                        time.sleep(5)
-                        continue
-                pbar.finish()
-            else:
-                self.ec2.conn.delete_security_group(group_id=sg.id)
-                while self.ec2.get_group_or_none(self._security_group):
-                    log.info("Waiting for deletion of security group %s..."
-                            % sg.name)
-                    time.sleep(3)
+            self.ec2.delete_group(sg)
 
     def start(self, create=True, create_only=False, validate=True,
               validate_only=False, validate_running=False):
@@ -1792,21 +1758,23 @@ class Cluster(object):
             raise
 
     def ssh_to_master(self, user='root', command=None, forward_x11=False,
-                      forward_agent=False):
-        return self.ssh_to_node(self._make_alias(master=True),
-                                user=user, command=command,
-                                forward_x11=forward_x11,
-                                forward_agent=forward_agent)
+                      forward_agent=False, pseudo_tty=False):
+        return self.master_node.shell(user=user, command=command,
+                                      forward_x11=forward_x11,
+                                      forward_agent=forward_agent,
+                                      pseudo_tty=pseudo_tty)
 
     def ssh_to_node(self, alias, user='root', command=None, forward_x11=False,
-                    forward_agent=False):
+                    forward_agent=False, pseudo_tty=False):
         node = self.get_node_by_alias(alias)
         node = node or self.get_node_by_dns_name(alias)
         node = node or self.get_node_by_id(alias)
         if not node:
             raise exception.InstanceDoesNotExist(alias, label='node')
         return node.shell(user=user, forward_x11=forward_x11,
-                          forward_agent=forward_agent, command=command)
+                          forward_agent=forward_agent,
+                          pseudo_tty=pseudo_tty,
+                          command=command)
 
     def clean(self):
         if not self.disable_queue:
@@ -2385,7 +2353,7 @@ class ClusterValidator(validators.Validator):
             ud = self.cluster._get_cluster_userdata(aliases)
         else:
             ud = self.cluster._get_cluster_userdata(
-                [self._make_alias(id=1)])
+                [self.cluster._make_alias(id=1)])
         ud_size_kb = utils.size_in_kb(ud)
         if ud_size_kb > 16:
             raise exception.ClusterValidationError(
