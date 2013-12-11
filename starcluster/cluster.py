@@ -1335,10 +1335,22 @@ class Cluster(object):
     def validate(self):
         return self.validator.validate()
 
+    def _cancel_blocking_spots(self, spot_requests):
+        for spot in spot_requests:
+            if spot.state == "open" and spot.status.code not in ["active",
+                    "pending-evaluation", "pending-fulfillment"]:
+                spot.cancel()
+                log.info("{:} was cancelled because its status was {:}"
+                         .format(spot.id, spot.status.code))
+
+
     def wait_for_active_spots(self, spots=None):
         """
         Wait for all open spot requests for this cluster to transition to
         'active'.
+        cancel_on_blocking: If the request state is not pending-evaluation,
+                            pending-fulfillment, nor active, it will be
+                            cancelled. This can be used to avoid long waits.
         """
         spots = spots or self.spot_requests
         open_spots = [spot for spot in spots if spot.state == "open"]
@@ -1354,6 +1366,7 @@ class Cluster(object):
                 if not pbar.finished:
                     time.sleep(self.refresh_interval)
                     spots = self.get_spot_requests_or_raise()
+                    self._cancel_blocking_spots(spots)
                 else:
                     self.ec2.wait_for_propagation(
                         instances=[s.instance_id for s in active_spots])
