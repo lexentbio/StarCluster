@@ -817,7 +817,18 @@ class Cluster(object):
         log.debug('returning self._nodes = %s' % self._nodes)
         aliases = [n.alias for n in self._nodes]
         if len(aliases) != len(set(aliases)):
-            raise Exception("Nodes with same name detected!")
+            log.error("Nodes with same name detected!")
+            if not any([n.reset_alias() for n in self._nodes]):
+                raise exception.BaseException("Failed to fix nodes with same "
+                                              "name issue")
+
+            aliases = [n.alias for n in self._nodes]
+            if len(aliases) != len(set(aliases)):
+                raise exception.BaseException("Failed to fix nodes with same "
+                                              "name issue")
+
+            self.recover()
+
         return self._nodes
 
     def get_nodes_or_raise(self):
@@ -938,7 +949,7 @@ class Cluster(object):
         availability_zone_group = None if placement_group is False \
             else cluster_sg
         if zone is None and placement_group is not False:
-                zone = getattr(self.zone, 'name', None)
+            zone = getattr(self.zone, 'name', None)
 
         #launch_group is related to placement group
         launch_group = availability_zone_group
@@ -1810,8 +1821,8 @@ class Cluster(object):
                     #the plugin does not implement get_nodes_to_recover
                     pass
             if len(to_recover) > 1:
-                log.error("Cannot support more than one list of nodes "
-                          "to recover")
+                log.error("Support for more than one list of nodes "
+                          "to recover is not implemented")
             elif len(to_recover) == 1:
                 errors = []
                 for node in to_recover[0]:
