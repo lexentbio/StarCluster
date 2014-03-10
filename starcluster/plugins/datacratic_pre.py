@@ -19,7 +19,7 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
         #create a 20GB swap in a background process
         launch_time = utils.iso_to_datetime_tuple(node.launch_time)
         shutdown_in = int((launch_time + datetime.timedelta(minutes=235) -
-                          datetime.datetime.utcnow()).total_seconds() / 60)
+                          utils.get_utc_now()).total_seconds() / 60)
         if shutdown_in > 0:
             log.info("Shutdown order in 3h55 minutes from launch ("
                      + str(shutdown_in) + ")")
