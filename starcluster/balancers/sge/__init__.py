@@ -134,14 +134,14 @@ class SGEStats(object):
                   (num_tasks, tasks))
         return num_tasks
 
-    def qacct_to_datetime_tuple(self, qacct):
+    def qacct_to_datetime_tuple(self, qacct, tzinfo):
         """
         Takes the SGE qacct formatted time and makes a datetime tuple
         format is:
         Tue Jul 13 16:24:03 2010
         """
         dt = datetime.datetime.strptime(qacct, "%a %b %d %H:%M:%S %Y")
-        return dt.replace(tzinfo=iso8601.iso8601.UTC)
+        return dt.replace(tzinfo=tzinfo)
 
     def parse_qacct(self, string, dtnow):
         """
@@ -156,22 +156,23 @@ class SGEStats(object):
         end = None
         counter = 0
         lines = string.split('\n')
+        tzinfo = dtnow.tzinfo
         for l in lines:
             l = l.strip()
             if l.find('jobnumber') != -1:
                 job_id = int(l[13:len(l)])
             elif l.find('qsub_time') != -1:
-                qd = self.qacct_to_datetime_tuple(l[13:len(l)])
+                qd = self.qacct_to_datetime_tuple(l[13:len(l)], tzinfo)
             elif l.find('start_time') != -1:
                 if l.find('-/-') > 0:
                     start = dtnow
                 else:
-                    start = self.qacct_to_datetime_tuple(l[13:len(l)])
+                    start = self.qacct_to_datetime_tuple(l[13:len(l)], tzinfo)
             elif l.find('end_time') != -1:
                 if l.find('-/-') > 0:
                     end = dtnow
                 else:
-                    end = self.qacct_to_datetime_tuple(l[13:len(l)])
+                    end = self.qacct_to_datetime_tuple(l[13:len(l)], tzinfo)
             elif l.find('==========') != -1:
                 if qd is not None:
                     self.max_job_id = job_id
@@ -217,7 +218,7 @@ class SGEStats(object):
         """
         returns a count of the hosts in the cluster
         """
-        #todo: throw an exception if hosts not initialized
+        # todo: throw an exception if hosts not initialized
         return len(self.hosts)
 
     def count_total_slots(self):
@@ -259,7 +260,7 @@ class SGEStats(object):
                 st = j['JB_submission_time']
                 dt = utils.iso_to_datetime_tuple(st)
                 return dt
-        #todo: throw a "no queued jobs" exception
+        # todo: throw a "no queued jobs" exception
 
     def is_node_working(self, node):
         """
@@ -339,21 +340,21 @@ class SGEStats(object):
     def get_all_stats(self):
         now = utils.get_utc_now()
         bits = []
-        #first field is the time
+        # first field is the time
         bits.append(now)
-        #second field is the number of hosts
+        # second field is the number of hosts
         bits.append(self.count_hosts())
-        #third field is # of running jobs
+        # third field is # of running jobs
         bits.append(len(self.get_running_jobs()))
-        #fourth field is # of queued jobs
+        # fourth field is # of queued jobs
         bits.append(len(self.get_queued_jobs()))
-        #fifth field is total # slots
+        # fifth field is total # slots
         bits.append(self.count_total_slots())
-        #sixth field is average job duration
+        # sixth field is average job duration
         bits.append(self.avg_job_duration())
-        #seventh field is average job wait time
+        # seventh field is average job wait time
         bits.append(self.avg_wait_time())
-        #last field is array of loads for hosts
+        # last field is array of loads for hosts
         arr = self.get_loads()
         # arr may be empty if there are no exec hosts
         if arr:
@@ -503,15 +504,21 @@ class SGELoadBalancer(LoadBalancer):
             except IOError, e:
                 raise exception.BaseException(str(e))
 
-    def get_remote_time(self):
+    def get_remote_time(self, utc=True):
         """
         This function remotely executes 'date' on the master node
         and returns a datetime object with the master's time
         instead of fetching it from local machine, maybe inaccurate.
         """
-        utc = '\n'.join(self._cluster.master_node.ssh.execute('date --utc'))
-        dt = datetime.datetime.strptime(utc, "%a %b %d %H:%M:%S UTC %Y")
-        return dt.replace(tzinfo=iso8601.iso8601.UTC)
+        if utc:
+            utc = \
+                '\n'.join(self._cluster.master_node.ssh.execute('date --utc'))
+            dt = datetime.datetime.strptime(utc, "%a %b %d %H:%M:%S UTC %Y")
+            return dt.replace(tzinfo=iso8601.iso8601.UTC)
+
+        cmd = 'date --rfc-3339=seconds'
+        date_str = '\n'.join(self._cluster.master_node.ssh.execute(cmd))
+        return iso8601.parse_date(date_str)
 
     def get_qatime(self, now):
         """
@@ -531,7 +538,7 @@ class SGELoadBalancer(LoadBalancer):
 
     def _get_stats(self):
         master = self._cluster.master_node
-        now = self.get_remote_time()
+        now = self.get_remote_time(utc=False)  # qacct expects localtime
         qatime = self.get_qatime(now)
         qacct_cmd = 'qacct -j -b ' + qatime
         qstat_cmd = 'qstat -u \* -xml -f -r'
@@ -651,19 +658,19 @@ class SGELoadBalancer(LoadBalancer):
             log.info("Last cluster modification time: %s" %
                      self.__last_cluster_mod_time.strftime("%Y-%m-%d %X"),
                      extra=dict(__raw__=True))
-            #evaluate if nodes need to be added
+            # evaluate if nodes need to be added
             self._eval_add_node()
-            #evaluate if nodes need to be removed
+            # evaluate if nodes need to be removed
             self._eval_remove_node()
             if self.dump_stats or self.plot_stats:
                 self.stat.write_stats_to_csv(self.stats_file)
-            #call the visualizer
+            # call the visualizer
             if self.plot_stats:
                 try:
                     self.visualizer.graph_all()
                 except IOError, e:
                     raise exception.BaseException(str(e))
-            #evaluate if cluster should be terminated
+            # evaluate if cluster should be terminated
             if self.kill_cluster:
                 if self._eval_terminate_cluster():
                     log.info("Terminating cluster and exiting...")
@@ -713,7 +720,7 @@ class SGELoadBalancer(LoadBalancer):
             log.info("Adding node: below minimum (%d)" % self.min_nodes)
             need_to_add = self.min_nodes - num_nodes
         elif total_slots == 0:
-            #no slots, add one now
+            # no slots, add one now
             need_to_add = 1
         elif qw_slots > avail_slots:
             log.info("Queued jobs need more slots (%d) than available (%d)" %
