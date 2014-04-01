@@ -1027,7 +1027,7 @@ class Cluster(object):
         user_data = self._get_cluster_userdata(aliases)
         kwargs = dict(price=spot_bid, instance_type=instance_type,
                       min_count=count, max_count=count, count=count,
-                      key_name=self.keyname, security_groups=[cluster_sg],
+                      key_name=self.keyname,
                       availability_zone_group=availability_zone_group,
                       launch_group=launch_group,
                       placement=zone or getattr(self.zone, 'name', None),
@@ -1881,7 +1881,24 @@ class Cluster(object):
                           pseudo_tty=pseudo_tty,
                           command=command)
 
+    def get_impaired_nodes(self):
+        impaired_statuses = self.ec2.conn.get_all_instance_status(
+            instance_ids=[node.id for node in self.nodes],
+            filters={"instance-status.status": "impaired"}
+        )
+        impaired_nodes_ids = [impaired.id for impaired in impaired_statuses]
+        return [node for node in self.nodes if node.id in impaired_nodes_ids]
+
     def clean(self):
+        impaired_nodes = self.get_impaired_nodes()
+        if impaired_nodes:
+            log.info("Impaired nodes will be handled:" + str(impaired_nodes))
+            for node in impaired_nodes:
+                if node.is_master():
+                    log.error("Master appears to be impaired but will not be"
+                              "handled")
+                    continue
+                node.handle_irresponsive_node()
         if not self.disable_queue:
             #clean sge
             sge_plugin = sge.SGEPlugin()
