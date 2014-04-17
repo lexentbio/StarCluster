@@ -245,16 +245,6 @@ class DefaultClusterSetup(ClusterSetup):
                                  jobid=node.alias)
         self.pool.wait(numtasks=len(nodes))
 
-    def _setup_etc_hosts(self, nodes=None):
-        """ Configure /etc/hosts on all StarCluster nodes"""
-        log.info("Configuring /etc/hosts on each node")
-        nodes = nodes or self._nodes
-        log.debug("Launching jobs " + str(datetime.datetime.utcnow()))
-        for node in nodes:
-            self.pool.simple_job(node.add_to_etc_hosts, (nodes, ),
-                                 jobid=node.alias)
-        self.pool.wait(numtasks=len(nodes))
-
     def _setup_passwordless_ssh(self, nodes=None):
         """
         Properly configure passwordless ssh for root and CLUSTER_USER on all
@@ -379,20 +369,20 @@ class DefaultClusterSetup(ClusterSetup):
         1. Add host to master's /etc/hosts (so dnsmasq can resolve it)
         2. Add a new 'prepend domain-name-servers' entry to
            /etc/dhcp/dhclient.conf with IP address of master node
-        3. Restart eth0 network interface to make changes propagate to 
+        3. Restart eth0 network interface to make changes propagate to
            /etc/resolv.conf
         """
         log.info("Setting up DNS-based hostname resolving")
         if start_server:
             log.debug("Installing/starting DNS server (dnsmasq) on master")
             self._master.apt_install("dnsmasq")
-        
+
         log.debug("Adding nodes to /etc/hosts on master")
         nodes = nodes or self._nodes
         self._master.add_to_etc_hosts(nodes)
 
         log.debug("Setting up DNS nameserver on each node")
-        
+
         for node in nodes:
             self.pool.simple_job(node.setup_dns,
                                  (self._master.private_ip_address, ),

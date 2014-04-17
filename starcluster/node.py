@@ -863,12 +863,13 @@ class Node(object):
             self.ssh.makedirs(path)
         self.ssh.execute('mount %s' % path)
 
-    def add_to_etc_hosts(self, nodes):
+    def add_to_etc_hosts(self, nodes, truncate=False):
         """
         Adds all names for node in nodes arg to this node's /etc/hosts file
         """
         self.remove_from_etc_hosts(nodes)
-        host_file = self.ssh.remote_file('/etc/hosts', 'a')
+        host_file = \
+            self.ssh.remote_file('/etc/hosts', 'w' if truncate else 'a')
         for node in nodes:
             print >> host_file, node.get_hosts_entry()
         host_file.close()
@@ -906,12 +907,12 @@ class Node(object):
 
     def setup_dns(self, nameserver_ip):
         """
-        1. Add new "prepend domain-name-servers" directive to 
+        1. Add new "prepend domain-name-servers" directive to
             /etc/dhcp/dhclient.conf
         2. Restart network interface to make changes apply. A nameserver
-            entry is added to /etc/resolv.conf (Warning: /etc/resolv.conf is 
+            entry is added to /etc/resolv.conf (Warning: /etc/resolv.conf is
             updated dynamically-- changes to it will NOT hold).
-        2. Add entry for current node to /etc/hosts. This is required for SGE 
+        2. Add entry for current node to /etc/hosts. This is required for SGE
             compatibility
         """
         self.ssh.execute(
@@ -920,7 +921,7 @@ class Node(object):
             " && service network-interface restart INTERFACE=eth0" % nameserver_ip)
 
         # required for SGE compatibility
-        self.add_to_etc_hosts([self])
+        self.add_to_etc_hosts([self], truncate=True)
 
 
     @property
