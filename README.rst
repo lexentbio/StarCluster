@@ -1,10 +1,10 @@
 ===================
-StarCluster v0.95.3
+StarCluster v0.95.5
 ===================
 vanilla_improvements notes are at the bottom.
 
 :StarCluster: Cluster Computing Toolkit for the Cloud
-:Version: 0.95.3
+:Version: 0.95.5
 :Author: Justin Riley <justin.t.riley@gmail.com>
 :Team: Software Tools for Academics and Researchers (http://star.mit.edu)
 :Homepage: http://star.mit.edu/cluster
@@ -203,7 +203,9 @@ This branch intends to be a mirror of https://github.com/jtriley/StarCluster dev
 * Added commands
     - printconfig - To print your existing cluster configuration
     - reloadconfig - To reload the core and plugins configuration of a ''running'' cluster.
-    - cleancluster - Will clean Open Grid Engine from dead nodes. 
+    - cleancluster
+        + Will clean Open Grid Engine from dead nodes. (Eg.: Dead spot instances)
+        + Manages "impaired" nodes. (Reboots reserved instances, kills spot instances.)
       (Useful with spot instances and used by the vanilla_improvements load balancer)
     - recover
         + If sge_qmaster crashed, restarts it.
