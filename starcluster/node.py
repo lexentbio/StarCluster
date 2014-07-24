@@ -968,7 +968,7 @@ class Node(object):
             return spot[0]
 
     def is_master(self):
-        return self.alias == 'master' or self.alias.endswith("-master")
+        return self.alias.find("master") != -1
 
     def is_instance_store(self):
         return self.instance.root_device_type == "instance-store"
