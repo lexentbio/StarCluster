@@ -78,6 +78,13 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
         # the commands used to setup users on the worker nodes
         node.ssh.execute("test -f /home/useradd.sh && /home/useradd.sh")
 
+        log.info("Creating /mnt/s3cache")
+        msg = node.ssh.execute("file /mnt/s3cache", ignore_exit_status=True)
+        if msg[0].find("ERROR") == -1:
+                log.warning("/mnt/s3Cache already exists")
+        else:
+                node.ssh.execute("install -d -m 1777 /mnt/s3cache")
+
     def on_remove_node(self, node, nodes, master, user, user_shell, volumes):
         pass
 
