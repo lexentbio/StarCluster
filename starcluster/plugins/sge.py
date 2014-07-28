@@ -35,7 +35,7 @@ class SGEPlugin(clustersetup.DefaultClusterSetup):
     SGE_ROOT = "/opt/sge6"
     SGE_FRESH = "/opt/sge6-fresh"
     SGE_PROFILE = "/etc/profile.d/sge.sh"
-    SGE_INST = "inst_sge"
+    SGE_INST = "inst_sge_sc"
     SGE_CONF = "ec2_sge.conf"
 
     def __init__(self, master_is_exec_host=True, slots_per_host=None,
