@@ -22,6 +22,8 @@ import string
 import pprint
 import warnings
 import datetime
+import json
+from collections import Counter
 
 import iptools
 
@@ -63,6 +65,11 @@ class ClusterManager(managers.Manager):
                 group = self.ec2.get_security_group(clname)
             cl = Cluster(ec2_conn=self.ec2, cluster_tag=cltag,
                          cluster_group=group)
+
+            # Useful when config is on master node
+            cl.key_location = \
+                self.cfg.get_key(cl.master_node.key_name).get('key_location')
+
             if load_receipt:
                 cl.load_receipt(load_plugins=load_plugins,
                                 load_volumes=load_volumes)
@@ -417,9 +424,11 @@ class Cluster(object):
                  cluster_group=None,
                  force_spot_master=False,
                  disable_cloudinit=False,
-                 subnet_id=None,
+                 subnet_ids=[],
                  public_ips=None,
                  plugins_order=[],
+                 config_on_master=False,
+                 dns_sufix=None,
                  **kwargs):
         # update class vars with given vars
         _vars = locals().copy()
@@ -446,18 +455,20 @@ class Cluster(object):
         self.force_spot_master = force_spot_master
         self.disable_cloudinit = disable_cloudinit
         self.plugins_order = plugins_order
+        self.dns_sufix = dns_sufix and cluster_tag
 
         self._cluster_group = None
         self._placement_group = None
-        self._subnet = None
         self._zone = None
         self._master = None
         self._nodes = []
         self._pool = None
         self._progress_bar = None
-        self._config_fields = None
         self.__default_plugin = None
         self.__sge_plugin = None
+        self._vpc_id = None
+        self._subnet_zones_mapping = None
+
 
     def __repr__(self):
         return '<Cluster: %s (%s-node)>' % (self.cluster_tag,
@@ -588,10 +599,12 @@ class Cluster(object):
         return pprint.pformat(cfg)
 
     def print_config(self):
-        config = {}
-        for key in self._config_fields:
-            config[key] = getattr(self, key)
-        pprint.pprint(config)
+        core_settings, user_settings = self._get_settings()
+        print "Core settings"
+        print json.dumps(core_settings, indent=1, sort_keys=True)
+        print
+        print "User settings"
+        print json.dumps(user_settings, indent=1, sort_keys=True)
 
     def load_receipt(self, load_plugins=True, load_volumes=True):
         """
@@ -608,8 +621,9 @@ class Cluster(object):
                 msg = user_msgs.version_mismatch % d
                 sep = '*' * 60
                 log.warn('\n'.join([sep, msg, sep]), extra={'__textwrap__': 1})
-            self._config_fields = self._get_settings_from_tags()
-            self.update(self._config_fields)
+            self.update(self._get_settings_from_tags())
+            if self.config_on_master:
+                self._load_config_from_master()
             if not (load_plugins or load_volumes):
                 return True
             try:
@@ -656,31 +670,15 @@ class Cluster(object):
     def _security_group(self):
         return static.SECURITY_GROUP_TEMPLATE % self.cluster_tag
 
-    def save_core_settings(self, sg):
-        core_settings = utils.dump_compress_encode(
-            dict(cluster_size=self.cluster_size,
-                 master_image_id=self.master_image_id,
-                 master_instance_type=self.master_instance_type,
-                 node_image_id=self.node_image_id,
-                 node_instance_type=self.node_instance_type,
-                 disable_queue=self.disable_queue,
-                 disable_cloudinit=self.disable_cloudinit,
-                 plugins_order=self.plugins_order),
-            use_json=True)
-        sg.add_tag(static.CORE_TAG, core_settings)
-
-    def save_user_settings(self, sg):
-        user_settings = utils.dump_compress_encode(
-            dict(cluster_user=self.cluster_user,
-                 cluster_shell=self.cluster_shell, keyname=self.keyname,
-                 spot_bid=self.spot_bid), use_json=True)
-        sg.add_tag(static.USER_TAG, user_settings)
+    def get_vpc_id(self, subnet_id):
+        subnet = self.ec2.get_subnet(self.subnet_ids[0])
+        return subnet.vpc_id
 
     @property
-    def subnet(self):
-        if not self._subnet and self.subnet_id:
-            self._subnet = self.ec2.get_subnet(self.subnet_id)
-        return self._subnet
+    def vpc_id(self):
+        if not self._vpc_id and self.subnet_ids:
+            self._vpc_id = self.get_vpc_id(self.subnet_ids[0])
+        return self._vpc_id
 
     @property
     def cluster_group(self):
@@ -689,18 +687,26 @@ class Cluster(object):
         sg = self.ec2.get_group_or_none(self._security_group)
         if not sg:
             desc = 'StarCluster-%s' % static.VERSION.replace('.', '_')
-            if self.subnet:
+            if self.subnet_ids:
                 desc += ' (VPC)'
-            vpc_id = getattr(self.subnet, 'vpc_id', None)
             sg = self.ec2.create_group(self._security_group,
                                        description=desc,
                                        auth_ssh=True,
                                        auth_group_traffic=True,
-                                       vpc_id=vpc_id)
+                                       vpc_id=self.vpc_id)
             self._add_tags_to_sg(sg)
         self._add_permissions_to_sg(sg)
         self._cluster_group = sg
         return sg
+
+    @property
+    def subnets_mapping(self):
+        if self._subnet_zones_mapping is None:
+            mapping = {}
+            for subnet_id in self.subnet_ids:
+                mapping[subnet_id] = self.ec2.get_subnet(subnet_id)
+            self._subnet_zones_mapping = mapping
+        return self._subnet_zones_mapping
 
     def _add_permissions_to_sg(self, sg):
         ssh_port = static.DEFAULT_SSH_PORT
@@ -730,9 +736,10 @@ class Cluster(object):
             if tag not in sg.tags:
                 sg.add_tag(tag, chunk)
 
-    def _add_tags_to_sg(self, sg):
-        if static.VERSION_TAG not in sg.tags:
-            sg.add_tag(static.VERSION_TAG, str(static.VERSION))
+    def _get_settings(self):
+        """
+        The settings to save
+        """
         core_settings = dict(cluster_size=self.cluster_size,
                              master_image_id=self.master_image_id,
                              master_instance_type=self.master_instance_type,
@@ -740,19 +747,34 @@ class Cluster(object):
                              node_instance_type=self.node_instance_type,
                              availability_zone=self.availability_zone,
                              dns_prefix=self.dns_prefix,
-                             subnet_id=self.subnet_id,
+                             subnet_ids=self.subnet_ids,
                              public_ips=self.public_ips,
                              disable_queue=self.disable_queue,
-                             disable_cloudinit=self.disable_cloudinit)
+                             disable_cloudinit=self.disable_cloudinit,
+                             plugins_order=self.plugins_order,
+                             dns_sufix=self.dns_sufix)
         user_settings = dict(cluster_user=self.cluster_user,
                              cluster_shell=self.cluster_shell,
                              keyname=self.keyname, spot_bid=self.spot_bid)
-        core = utils.dump_compress_encode(core_settings, use_json=True,
-                                          chunk_size=static.MAX_TAG_LEN)
-        self._add_chunked_tags(sg, core, static.CORE_TAG)
-        user = utils.dump_compress_encode(user_settings, use_json=True,
-                                          chunk_size=static.MAX_TAG_LEN)
-        self._add_chunked_tags(sg, user, static.USER_TAG)
+        return core_settings, user_settings
+
+    def _add_tags_to_sg(self, sg):
+        if static.VERSION_TAG not in sg.tags:
+            sg.add_tag(static.VERSION_TAG, str(static.VERSION))
+        if self.config_on_master:
+            # the only info we store is the fact that config is on master
+            core = utils.dump_compress_encode(
+                dict(config_on_master=self.config_on_master),
+                use_json=True, chunk_size=static.MAX_TAG_LEN)
+            self._add_chunked_tags(sg, core, static.CORE_TAG)
+        else:
+            core_settings, user_settings = self._get_settings()
+            core = utils.dump_compress_encode(core_settings, use_json=True,
+                                              chunk_size=static.MAX_TAG_LEN)
+            self._add_chunked_tags(sg, core, static.CORE_TAG)
+            user = utils.dump_compress_encode(user_settings, use_json=True,
+                                              chunk_size=static.MAX_TAG_LEN)
+            self._add_chunked_tags(sg, user, static.USER_TAG)
 
     def _load_chunked_tags(self, sg, base_tag_name):
         tags = [i for i in sg.tags if i.startswith(base_tag_name)]
@@ -768,6 +790,35 @@ class Cluster(object):
         if static.USER_TAG in sg.tags:
             cluster.update(self._load_chunked_tags(sg, static.USER_TAG))
         return cluster
+
+    def save_config_on_master(self):
+        """
+        Vanilla Improvements function - save the config on the master node.
+        For cluster saving their config on the master node rather than in
+        the security group tags. No more chunk/hashing/splitting headaches.
+        """
+        log.info("Saving config on master")
+        settings, user_settings = self._get_settings()
+        settings.update(user_settings)
+        settings["plugins"] = self._plugins
+        config = self.master_node.ssh.remote_file(static.MASTER_CFG_FILE, 'wt')
+        json.dump(settings, config, indent=4, separators=(',', ': '),
+                  sort_keys=True)
+        config.close()
+
+    def _load_config_from_master(self):
+        """
+        Vanilla Improvements function - loads the config on the master node.
+        """
+        config = self.master_node.ssh.remote_file(static.MASTER_CFG_FILE, 'rt')
+        loaded_config = json.load(config)
+        self.plugins_order = loaded_config["plugins"]
+        self.update(loaded_config)
+        config.close()
+        master = self.master_node
+        self.plugins = self.load_plugins(
+            master.get_plugins(self.plugins_order))
+        self.validate()
 
     @property
     def placement_group(self):
@@ -802,8 +853,8 @@ class Cluster(object):
         # remove any cached nodes not in the current node list from EC2
         current_ids = [n.id for n in nodes]
 
-        #If a node was terminated due to error, even if it still shows up,
-        #ignore it
+        # If a node was terminated due to error, even if it still shows up,
+        # ignore it
         to_remove = set()
         for id in NodeManager.nodes_id_ignore:
             if id in current_ids:
@@ -839,14 +890,14 @@ class Cluster(object):
                     self._nodes.append(n)
         self._nodes.sort(key=lambda n: n.alias)
         log.debug('returning self._nodes = %s' % self._nodes)
-        aliases = [n.alias for n in self._nodes]
+        aliases = [_n.alias for _n in self._nodes]
         if len(aliases) != len(set(aliases)):
             log.error("Nodes with same name detected!")
-            if not any([n.reset_alias() for n in self._nodes]):
+            if not any([_n.reset_alias() for _n in self._nodes]):
                 raise exception.BaseException("Failed to fix nodes with same "
                                               "name issue")
 
-            aliases = [n.alias for n in self._nodes]
+            aliases = [_n.alias for _n in self._nodes]
             if len(aliases) != len(set(aliases)):
                 raise exception.BaseException("Failed to fix nodes with same "
                                               "name issue")
@@ -924,18 +975,17 @@ class Cluster(object):
 
     def _make_alias(self, id=None, master=False):
         if master:
-            if self.dns_prefix:
-                return "%s-master" % self.dns_prefix
-            else:
-                return "master"
+            alias = "master"
         elif id is not None:
-            if self.dns_prefix:
-                alias = '%s-node%.3d' % (self.dns_prefix, id)
-            else:
-                alias = 'node%.3d' % id
+            alias = 'node{:03d}'.format(id)
         else:
             raise AttributeError("_make_alias(...) must receive either"
                                  " master=True or a node id number")
+
+        if self.dns_prefix:
+            alias = "{}-{}".format(self.dns_prefix, alias)
+        if self.dns_sufix:
+            alias = "{}.{}".format(alias, self.dns_sufix)
         return alias
 
     @property
@@ -952,7 +1002,7 @@ class Cluster(object):
         states = ['active', 'open']
         filters = {'state': states}
         vpc_id = self.cluster_group.vpc_id
-        if vpc_id and self.subnet_id:
+        if vpc_id and self.subnet_ids:
             # According to the EC2 API docs this *should* be
             # launch.network-interface.group-id but it doesn't work
             filters['network-interface.group-id'] = group_id
@@ -1014,15 +1064,21 @@ class Cluster(object):
                 log.warn("Instances will not be launched in a placement group")
                 placement_group = None
             elif placement_group is None:
-                #if placement_group is False -> leave false
+                # if placement_group is False -> leave false
                 placement_group = self.placement_group.name
         availability_zone_group = None if placement_group is False \
             else cluster_sg
-        #launch_group is related to placement group
+        # launch_group is related to placement group
         launch_group = availability_zone_group
 
         if spot_bid and not placement_group and zone is None:
-            zone, price = self.ec2.get_spot_cheapest_zone(instance_type)
+            zones_filter = None
+            if self.subnet_ids:
+                zones_filter = [s_net.availability_zone
+                                for s_net in self.subnets_mapping.values()]
+
+            zone, price = self.ec2.get_spot_cheapest_zone(instance_type,
+                                                          zones_filter)
             log.info("Min price of %f found in zone %s", price, zone)
             if price > spot_bid:
                 # Let amazon pick the first zone where the prices goes
@@ -1042,10 +1098,19 @@ class Cluster(object):
                       placement=zone,
                       user_data=user_data,
                       placement_group=placement_group)
-        if self.subnet_id:
+        if self.subnet_ids:
+            subnet_id = self.subnet_ids[0] # default subnet
+            if zone:
+                found = False
+                for s_id, s_net in self.subnets_mapping.iteritems():
+                    if s_net.availability_zone == zone:
+                        found = True
+                        subnet_id = s_id
+                        break
+                assert found
             netif = self.ec2.get_network_spec(
                 device_index=0, associate_public_ip_address=self.public_ips,
-                subnet_id=self.subnet_id, groups=[self.cluster_group.id])
+                subnet_id=subnet_id, groups=[self.cluster_group.id])
             kwargs.update(
                 network_interfaces=self.ec2.get_network_collection(netif))
         else:
@@ -1054,7 +1119,7 @@ class Cluster(object):
         if spot_bid:
             security_group_id = self.cluster_group.id
             for alias in aliases:
-                if not self.subnet_id:
+                if not self.subnet_ids:
                     kwargs['security_group_ids'] = [security_group_id]
                 kwargs['user_data'] = self._get_cluster_userdata([alias])
                 resvs.extend(self.ec2.request_instances(image_id, **kwargs))
@@ -1116,12 +1181,18 @@ class Cluster(object):
             raise exception.ClusterValidationError(
                 "worker nodes cannot have master as an alias")
         if not no_create:
-            if self.subnet:
-                ip_count = self.subnet.available_ip_address_count
-                if ip_count < len(aliases):
-                    raise exception.ClusterValidationError(
-                        "Not enough IP addresses available in %s (%d)" %
-                        (self.subnet.id, ip_count))
+            if self.subnet_ids:
+                subnet = None
+                tested = False
+                for s_net in self.subnets_mapping.values():
+                    if zone is None or s_net.availability_zone == zone:
+                        tested = True
+                        ip_count = s_net.available_ip_address_count
+                        if ip_count < len(aliases):
+                            raise exception.ClusterValidationError(
+                                "Not enough IP addresses available in "
+                                "%s (%d)" % (subnet.id, ip_count))
+                assert tested
             for node in running_pending:
                 if node.alias in aliases:
                     raise exception.ClusterValidationError(
@@ -1139,12 +1210,12 @@ class Cluster(object):
                               reboot_interval=reboot_interval,
                               n_reboot_restart=n_reboot_restart)
         if all([not no_create, spot_bid, reboot_interval, n_reboot_restart]):
-            #this will recreate the spot instances that might have died in
-            #wait_for_cluster
+            # this will recreate the spot instances that might have died in
+            # wait_for_cluster
             try_again_aliases = []
             while 1:
                 for alias in aliases:
-                    #verify all nodes were correctly added
+                    # verify all nodes were correctly added
                     try:
                         self.get_node_by_alias(alias)
                     except exception.InstanceDoesNotExist:
@@ -1168,7 +1239,7 @@ class Cluster(object):
                         reboot_interval=reboot_interval,
                         n_reboot_restart=n_reboot_restart)
                 else:
-                    #all nodes successfully created
+                    # all nodes successfully created
                     break
 
         log.debug("Adding node(s): %s" % aliases)
@@ -1211,7 +1282,7 @@ class Cluster(object):
                 self.run_plugins(method_name="on_remove_node",
                                  node=node, reverse=True)
             except:
-                #will still allow node termination
+                # will still allow node termination
                 pass
             if not terminate:
                 continue
@@ -1290,7 +1361,7 @@ class Cluster(object):
         Launches all EC2 instances based on this cluster's settings.
         """
         log.info("Launching a %d-node %s" % (self.cluster_size, ' '.join(
-            ['VPC' if self.subnet_id else '', 'cluster...']).strip()))
+            ['VPC' if self.subnet_ids else '', 'cluster...']).strip()))
         mtype = self.master_instance_type or self.node_instance_type
         self.master_instance_type = mtype
         if self.spot_bid:
@@ -1738,7 +1809,8 @@ class Cluster(object):
             self.ec2.delete_group(sg)
 
     def start(self, create=True, create_only=False, validate=True,
-              validate_only=False, validate_running=False):
+              validate_only=False, validate_running=False,
+              save_config_on_master=False):
         """
         Creates and configures a cluster from this cluster template's settings.
 
@@ -1769,10 +1841,12 @@ class Cluster(object):
                 return
         else:
             log.warn("SKIPPING VALIDATION - USE AT YOUR OWN RISK")
-        return self._start(create=create, create_only=create_only)
+        return self._start(create=create, create_only=create_only,
+                           save_config_on_master=save_config_on_master)
 
     @print_timing("Starting cluster")
-    def _start(self, create=True, create_only=False):
+    def _start(self, create=True, create_only=False,
+               save_config_on_master=False):
         """
         Create and configure a cluster from this cluster template's settings
         (Does not attempt to validate before running)
@@ -1792,25 +1866,27 @@ class Cluster(object):
                 node.start()
         if create_only:
             return
-        self.setup_cluster()
+        self.setup_cluster(save_config_on_master)
 
-    def setup_cluster(self):
+    def setup_cluster(self, save_config_on_master):
         """
         Waits for all nodes to come up and then runs the default
         StarCluster setup routines followed by any additional plugin setup
         routines
         """
         self.wait_for_cluster()
-        self._setup_cluster()
+        self._setup_cluster(save_config_on_master)
 
     @print_timing("Configuring cluster")
-    def _setup_cluster(self):
+    def _setup_cluster(self, save_config_on_master):
         """
         Runs the default StarCluster setup routines followed by any additional
         plugin setup routines. Does not wait for nodes to come up.
         """
         log.info("The master node is %s" % self.master_node.dns_name)
         log.info("Configuring cluster...")
+        if save_config_on_master:
+            self.save_config_on_master()
         if self.volumes:
             self.attach_volumes_to_master()
         self.run_plugins()
@@ -1904,7 +1980,7 @@ class Cluster(object):
                     continue
                 node.handle_irresponsive_node()
         if not self.disable_queue:
-            #clean sge
+            # clean sge
             sge_plugin = sge.SGEPlugin()
             sge_plugin.clean_cluster(self.nodes, self.master_node,
                                      self.cluster_user,
@@ -1933,7 +2009,7 @@ class Cluster(object):
                     result = plugin.get_nodes_to_recover(self.nodes)
                     to_recover.append(result)
                 except:
-                    #the plugin does not implement get_nodes_to_recover
+                    # the plugin does not implement get_nodes_to_recover
                     pass
             if len(to_recover) > 1:
                 log.error("Support for more than one list of nodes "
@@ -1941,8 +2017,8 @@ class Cluster(object):
             elif len(to_recover) == 1:
                 errors = []
                 for node in to_recover[0]:
-                    #call it one at a time so that x doesn't prevent
-                    #y to be added
+                    # call it one at a time so that x doesn't prevent
+                    # y to be added
                     if node.alias == "master":
                         raise Exception("Cannot add back master node")
                     try:
@@ -2067,6 +2143,7 @@ class ClusterValidator(validators.Validator):
             self.validate_required_settings()
             self.validate_vpc()
             self.validate_dns_prefix()
+            self.validate_dns_sufix()
             self.validate_spot_bid()
             self.validate_cluster_size()
             self.validate_cluster_user()
@@ -2111,6 +2188,22 @@ class ClusterValidator(validators.Validator):
                 " via the dns_prefix option, {dns_prefix} should only have"
                 " alphanumeric characters and a '-' or '.'".format(
                     dns_prefix=self.cluster.dns_prefix))
+        return True
+
+    def validate_dns_sufix(self):
+        if not self.cluster.dns_sufix:
+            return True
+
+        # check that the dns prefix is a valid hostname
+        is_valid = utils.is_valid_hostname(self.cluster.dns_sufix)
+        if not is_valid:
+            raise exception.ClusterValidationError(
+                "The cluster name you chose, {dns_prefix}, is"
+                " not a valid dns name. "
+                " Since you have chosen to prepend the hostnames"
+                " via the dns_prefix option, {dns_prefix} should only have"
+                " alphanumeric characters and a '-' or '.'".format(
+                    dns_prefix=self.cluster.dns_sufix))
         return True
 
     def validate_spot_bid(self):
@@ -2476,44 +2569,75 @@ class ClusterValidator(validators.Validator):
                 "to store internal metadata" % ud_size_kb)
 
     def validate_vpc(self):
-        if self.cluster.subnet_id:
-            try:
-                assert self.cluster.subnet is not None
-            except exception.SubnetDoesNotExist as e:
-                raise exception.ClusterValidationError(e)
-            azone = self.cluster.availability_zone
-            szone = self.cluster.subnet.availability_zone
+        if not self.cluster.subnet_ids:
+            return
+        if self.cluster.public_ips is False:
+            raise exception.ClusterValidationError(
+                "Only VPC clusters can disable public IP addresses")
+
+        try:
+            assert self.cluster.vpc_id is not None
+        except exception.SubnetDoesNotExist as e:
+            raise exception.ClusterValidationError(e)
+
+        azone = self.cluster.availability_zone
+        if len(self.cluster.subnet_ids) > 1 and azone:
+            raise exception.ClusterValidationError(
+                "Cannot define a cluster availability_zone with multiple "
+                "subnets at the same time.")
+
+        nodes = self.cluster.nodes
+        zones = []
+        for subnet_id in self.cluster.subnet_ids:
+            subnet = self.cluster.ec2.get_subnet(subnet_id)
+
+            if subnet is None:
+                raise exception.ClusterValidationError(
+                    "Subnet id {} not found".format(subnet_id))
+            vpc_id = self.cluster.get_vpc_id(subnet_id)
+            assert vpc_id is not None
+            if vpc_id != self.cluster.vpc_id:
+                raise exception.ClusterValidationError(
+                    "All subnets must be in the same vpc")
+            szone = subnet.availability_zone
+            zones.append(szone)
             if azone and szone != azone:
                 raise exception.ClusterValidationError(
-                    "The cluster availability_zone (%s) does not match the "
-                    "subnet zone (%s)" % (azone, szone))
-            ip_count = self.cluster.subnet.available_ip_address_count
-            nodes = self.cluster.nodes
+                    "The cluster availability_zone (%s) does not match "
+                    "the subnet zone (%s)" % (azone, szone))
+
+            ip_count = subnet.available_ip_address_count
             if not nodes and ip_count < self.cluster.cluster_size:
                 raise exception.ClusterValidationError(
                     "Not enough IP addresses available in %s (%d)" %
                     (self.cluster.subnet.id, ip_count))
-            if self.cluster.public_ips:
-                gws = self.cluster.ec2.get_internet_gateways(filters={
-                    'attachment.vpc-id': self.cluster.subnet.vpc_id})
-                if not gws:
-                    raise exception.ClusterValidationError(
-                        "No internet gateway attached to VPC: %s" %
-                        self.cluster.subnet.vpc_id)
-                rtables = self.cluster.ec2.get_route_tables(filters={
-                    'association.subnet-id': self.cluster.subnet_id,
-                    'route.destination-cidr-block': static.WORLD_CIDRIP,
-                    'route.gateway-id': gws[0].id})
-                if not rtables:
-                    raise exception.ClusterValidationError(
-                        "No route to %s found for subnet: %s" %
-                        (static.WORLD_CIDRIP, self.cluster.subnet_id))
-            else:
-                log.warn(user_msgs.public_ips_disabled %
-                         dict(vpc_id=self.cluster.subnet.vpc_id))
-        elif self.cluster.public_ips is False:
-            raise exception.ClusterValidationError(
-                "Only VPC clusters can disable public IP addresses")
+
+        zones_count = Counter(zones)
+        for zone, count in zones_count.iteritems():
+            if count > 1:
+                raise exception.ClusterValidationError(
+                    "You cannot define 2 or more subnets in the same zone. "
+                    "({})".format(zone))
+
+        if self.cluster.public_ips:
+            gws = self.cluster.ec2.get_internet_gateways(filters={
+                'attachment.vpc-id': self.cluster.vpc_id})
+            if not gws:
+                raise exception.ClusterValidationError(
+                    "No internet gateway attached to VPC: %s" %
+                    self.cluster.vpc_id)
+            # for subnet_id in self.cluster.subnet_ids:
+            #     rtables = self.cluster.ec2.get_route_tables(filters={
+            #         'association.subnet-id': subnet_id,
+            #         'route.destination-cidr-block': static.WORLD_CIDRIP,
+            #         'route.gateway-id': gws[0].id})
+            #     if not rtables:
+            #         raise exception.ClusterValidationError(
+            #             "No route to %s found for subnet: %s" %
+            #             (static.WORLD_CIDRIP, subnet_id))
+        else:
+            log.warn(user_msgs.public_ips_disabled %
+                        dict(vpc_id=self.cluster.vpc_id))
 
 
 if __name__ == "__main__":

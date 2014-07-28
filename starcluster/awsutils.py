@@ -536,18 +536,18 @@ class EasyEC2(EasyAWS):
         for request in requests:
             requests_ids.append(request.id)
 
-        #Make sure the spot instance request has been ingested by EC2
-        #before proceeding. Wait at most 10 sec.
+        # Make sure the spot instance request has been ingested by EC2
+        # before proceeding. Wait at most 10 sec.
         counter = 0
         while True:
             all_requests = self.conn.get_all_spot_instance_requests()
-            all_requests.reverse()  # start from the end as our request will
-                                    # usually be the last
+            # start from the end as our request will usually be the last
+            all_requests.reverse()
             for request in all_requests:
                 if request.id in requests_ids:
                     del requests_ids[requests_ids.index(request.id)]
                     if len(requests_ids) == 0:
-                        #done
+                        # done
                         return requests
 
             if counter % 10 == 0:
@@ -1613,19 +1613,27 @@ class EasyEC2(EasyAWS):
         else:
             log.info("No console output available...")
 
-    def get_spot_cheapest_zone(self, instance_type):
-        # Find cheapest zone
+    def get_spot_cheapest_zone(self, instance_type, zone_filter):
+        """
+        Find cheapest zone.
+
+        zone_filter, if a list, zones to consider, if None, all zones
+            considered
+        """
         min_price = 9999
         min_zone = None
-        for z in ['a', 'c', 'd']:
-            zone = 'us-east-1' + z
+        for zone in self.conn.get_all_zones():
+            zone_name = zone.name
+            if zone_filter is not None and zone_name not in zone_filter:
+                log.debug("Filtered zone {}".format(zone_name))
+                continue
             price = self.get_spot_history(instance_type,
-                                          zone=zone,
+                                          zone=zone_name,
                                           mute=True)
             price = price[0][1]
-            log.debug("%s: %f", zone, price)
+            log.debug("%s: %f", zone_name, price)
             if price < min_price:
-                min_zone = zone
+                min_zone = zone_name
                 min_price = price
         return min_zone, min_price
 
