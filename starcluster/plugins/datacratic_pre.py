@@ -1,12 +1,10 @@
-import datetime
 from starcluster import clustersetup
 from starcluster.logger import log
-from starcluster import utils
 
 
 class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
 
-    def __init__(self, tag_billcode):
+    def __init__(self, tag_billcode, mount=None):
         self.tag_billcode = tag_billcode
 
     def run(self, nodes, master, user, user_shell, volumes):
@@ -16,9 +14,6 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
 
         node.add_tag("billcode", self.tag_billcode)
         #create a 20GB swap in a background process
-        launch_time = utils.iso_to_datetime_tuple(node.launch_time)
-        shutdown_in = int((launch_time + datetime.timedelta(minutes=235) -
-                          utils.get_utc_now()).total_seconds() / 60)
         log.info("Creating 20GB swap space on node " + node.alias)
         msg = node.ssh.execute("file /mnt/20GB.swap", ignore_exit_status=True)
         if msg[0].find("ERROR") != -1:
