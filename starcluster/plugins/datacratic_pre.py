@@ -4,7 +4,7 @@ from starcluster.logger import log
 
 class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
 
-    def __init__(self, tag_billcode, mount=None):
+    def __init__(self, tag_billcode):
         self.tag_billcode = tag_billcode
 
     def run(self, nodes, master, user, user_shell, volumes):
