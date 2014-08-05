@@ -27,4 +27,5 @@ __all__ = [
     'pypkginstaller',
     'xvfb',
     'mpich2',
+    'sge_add_submit_host'
 ]
