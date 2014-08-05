@@ -21,7 +21,7 @@ class SgeAddSubmitHostPlugin(clustersetup.DefaultClusterSetup):
         master.ssh.remove_lines_from_file('/etc/hosts', hostname)
 
         log.info("Adding {} {} to /etc/hosts".format(private_ip, hostname))
-        host_file = self.ssh.remote_file('/etc/hosts', 'a')
+        host_file = master.ssh.remote_file('/etc/hosts', 'a')
         print >> host_file, "{} {}".format(private_ip, hostname)
         host_file.close()
 
