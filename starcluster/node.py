@@ -34,6 +34,8 @@ from starcluster import managers
 from starcluster import userdata
 from starcluster import exception
 from starcluster.logger import log
+from starcluster.templates.network_interfaces \
+    import network_interfaces_template
 
 
 class NodeManager(managers.Manager):
@@ -908,6 +910,29 @@ class Node(object):
                     " invalid: %s" % hostname)
             else:
                 raise
+
+    def setup_dns(self, master_ip):
+        """
+        1. Add new "prepend domain-name-servers" directive to
+            /etc/dhcp/dhclient.conf
+        2. Restart network interface to make changes apply. A nameserver
+            entry is added to /etc/resolv.conf (Warning: /etc/resolv.conf is
+            updated dynamically-- changes to it will NOT hold).
+        2. Add entry for current node to /etc/hosts. This is required for SGE
+            compatibility
+        """
+        network_interfaces = network_interfaces_template.format(
+            master_ip=master_ip,
+            cluster_tag=self.alias[len(self.short_alias) + 1:])
+        net_int_file = self.ssh.remote_file('/etc/network/interfaces', 'wt')
+        net_int_file.write(network_interfaces)
+        net_int_file.close()
+
+        self.ssh.execute("service network-interface restart INTERFACE=eth0")
+
+        # required for SGE compatibility
+        self.add_to_etc_hosts([self])
+
 
     @property
     def network_names(self):
