@@ -3,6 +3,9 @@ from starcluster.logger import log
 
 
 class SgeAddSubmitHostPlugin(clustersetup.DefaultClusterSetup):
+    """
+    Intent: Update the master node to take a new submit host into account.
+    """
 
     def __init__(self):
         pass
