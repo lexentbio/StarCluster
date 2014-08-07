@@ -4,11 +4,18 @@ from starcluster.logger import log
 
 class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
 
-    def __init__(self, tag_billcode):
+    def __init__(self, tag_billcode, security_groups=[]):
         self.tag_billcode = tag_billcode
+        log.info(security_groups)
+        if type(security_groups) is list:
+            self.security_groups = security_groups
+        else:
+            self.security_groups = \
+                [sg.strip() for sg in security_groups.split(",")]
 
     def run(self, nodes, master, user, user_shell, volumes):
         master.add_tag("billcode", self.tag_billcode)
+        self.update_security_groups(master)
 
     def on_add_node(self, node, nodes, master, user, user_shell, volumes):
 
@@ -44,3 +51,15 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
 
     def recover(self, nodes, master, user, user_shell, volumes):
         pass
+
+    def update_security_groups(self, node):
+        groups = [str(g.id) for g in node.instance.groups] \
+            + self.security_groups
+        log.info("Updating {} security groups to {}" \
+                 .format(node.short_alias, groups))
+        rez = node.ec2.conn.modify_instance_attribute(node.instance.id,
+                                                      "groupSet",
+                                                      groups)
+        if not rez:
+            log.error("Failed to assign additional security groups to {}"
+                      .format(node.short_alias))
