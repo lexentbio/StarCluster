@@ -6,7 +6,6 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
 
     def __init__(self, tag_billcode, security_groups=[]):
         self.tag_billcode = tag_billcode
-        log.info(security_groups)
         if type(security_groups) is list:
             self.security_groups = security_groups
         else:
@@ -20,6 +19,8 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
     def on_add_node(self, node, nodes, master, user, user_shell, volumes):
 
         node.add_tag("billcode", self.tag_billcode)
+        self.update_security_groups(node)
+
         #create a 20GB swap in a background process
         log.info("Creating 20GB swap space on node " + node.alias)
         msg = node.ssh.execute("file /mnt/20GB.swap", ignore_exit_status=True)
