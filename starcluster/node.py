@@ -36,6 +36,8 @@ from starcluster import exception
 from starcluster.logger import log
 from starcluster.templates.network_interfaces \
     import network_interfaces_template
+from starcluster.templates.resolv_conf \
+    import resolv_conf_template
 
 
 class NodeManager(managers.Manager):
@@ -921,14 +923,12 @@ class Node(object):
         2. Add entry for current node to /etc/hosts. This is required for SGE
             compatibility
         """
-        network_interfaces = network_interfaces_template.format(
+        resolv_conf = resolv_conf_template.format(
             master_ip=master_ip,
             cluster_tag=self.alias[len(self.short_alias) + 1:])
-        net_int_file = self.ssh.remote_file('/etc/network/interfaces', 'wt')
-        net_int_file.write(network_interfaces)
+        net_int_file = self.ssh.remote_file('/etc/resolv.conf', 'wt')
+        net_int_file.write(resolv_conf)
         net_int_file.close()
-
-        self.ssh.execute("service network-interface restart INTERFACE=eth0")
 
         # required for SGE compatibility
         self.add_to_etc_hosts([self])
