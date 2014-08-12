@@ -387,11 +387,13 @@ class DefaultClusterSetup(ClusterSetup):
         log.debug("Setting up DNS nameserver on each node")
 
         for node in nodes:
-            self.pool.simple_job(node.setup_dns,
-                                 (self._master.private_ip_address, ),
-                                 jobid=node.alias)
+            if not node.is_master():
+                self.pool.simple_job(node.setup_dns,
+                                    (self._master.private_ip_address, ),
+                                    jobid=node.alias)
 
-        self._master.ssh.execute("pkill -HUP dnsmasq")
+        if len(nodes) > 1 or not nodes[0].is_master():
+            self._master.ssh.execute("pkill -HUP dnsmasq")
 
 
     def run(self, nodes, master, user, user_shell, volumes):
