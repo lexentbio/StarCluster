@@ -1,11 +1,15 @@
+from functools import partial
 from starcluster import clustersetup
 from starcluster.logger import log
+from starcluster.exception import BaseException
 
 
 class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
 
-    def __init__(self, tag_billcode, security_groups=[]):
+    def __init__(self, tag_billcode, security_groups=[],
+                 starbase_client_group_id=None):
         self.tag_billcode = tag_billcode
+        self.starbase_client_group_id = starbase_client_group_id
         if type(security_groups) is list:
             self.security_groups = security_groups
         else:
@@ -14,12 +18,13 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
 
     def run(self, nodes, master, user, user_shell, volumes):
         master.add_tag("billcode", self.tag_billcode)
-        self.update_security_groups(master)
+        self.update_cluster_security_group(master)
+        self.update_instance_security_groups(master)
 
     def on_add_node(self, node, nodes, master, user, user_shell, volumes):
 
         node.add_tag("billcode", self.tag_billcode)
-        self.update_security_groups(node)
+        self.update_instance_security_groups(node)
 
         #create a 20GB swap in a background process
         log.info("Creating 20GB swap space on node " + node.alias)
@@ -53,7 +58,66 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
     def recover(self, nodes, master, user, user_shell, volumes):
         pass
 
-    def update_security_groups(self, node):
+    def update_cluster_security_group(self, master):
+        """
+        Update the cluster security group permissions
+        """
+        for group in master.instance.groups:
+            if group.name[:4] == "@sc-":
+                groups = master.ec2.conn.get_all_security_groups(
+                    group_ids=[group.id])
+                if not groups:
+                    raise BaseException("Failed to fetch the group associated "
+                                        "to id {}".format(group.id))
+                group = groups[0]
+                break
+        else:
+            raise BaseException("Failed to find the cluster security group")
+
+        # Erase all rules and create them anew
+        group_rules = list(group.rules) # copy the list because it seems to be
+                                        # updated asynchronously
+        for ip_permission in group_rules:
+            src_group = None
+            revoke = partial(group.revoke,
+                             ip_protocol=ip_permission.ip_protocol,
+                             from_port=ip_permission.from_port,
+                             to_port=ip_permission.to_port)
+            if ip_permission.grants:
+                grant = ip_permission.grants[0]
+                if grant.group_id:
+                    revoke(src_group=grant)
+                    continue
+                elif grant.cidr_ip:
+                    revoke(cidr_ip=grant)
+                    continue
+            log.warning("Group rule removal probably failed")
+            revoke()
+
+        # Create the rules we want
+        # All within this cluster
+        group.authorize(ip_protocol='-1',
+                        from_port='-1',
+                        to_port='-1',
+                        src_group=group)
+
+        if self.starbase_client_group_id:
+            # StarBase Client group
+            grp_lst = master.ec2.conn.get_all_security_groups(
+                group_ids=[self.starbase_client_group_id])
+            if not grp_lst:
+                raise BaseException("Failed to find group id {}"
+                                    .format(self.starbase_client_group_id))
+            group.authorize(ip_protocol='-1',
+                            from_port='-1',
+                            to_port='-1',
+                            src_group=grp_lst[0])
+
+
+    def update_instance_security_groups(self, node):
+        """
+        Adds the configured security groups to a node
+        """
         groups = [str(g.id) for g in node.instance.groups] \
             + self.security_groups
         log.info("Updating {} security groups to {}" \
