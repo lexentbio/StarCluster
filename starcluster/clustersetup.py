@@ -365,8 +365,9 @@ class DefaultClusterSetup(ClusterSetup):
         # setup /etc/exports and start nfsd on master node
         nodes = nodes or self.nodes
         export_paths = export_paths or self._get_nfs_export_paths()
-        if start_server:
-            master.start_nfs_server()
+        # if start_server:
+            # datacratic version
+            # master.start_nfs_server()
         if nodes:
             master.export_fs_to_nodes(nodes, export_paths)
             self._mount_nfs_shares(nodes, export_paths=export_paths)
