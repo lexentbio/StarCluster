@@ -14,8 +14,8 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
         self._create_dce(master, True)
         log.info("Setting master to 0 slot")
         self._set_node_slots(master, master.alias, 0)
-        log.info("Creating complex values configuration")
         self._create_complex_values(master)
+        self._update_sge_msconf(master)
         log.info("******")
         log.info("You need to run salt over the master node before adding "
                  "slave nodes.")
@@ -73,6 +73,7 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
         """
         Defines complex values in OGS
         """
+        log.info("Creating complex values configuration")
         dest = "/root/qconf_mc.qconf"
         master.ssh.execute("export EDITOR=" + self._dcePath + "; "
                            + "export DCE_DEST=" + dest + "; "
@@ -87,6 +88,28 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
         qconf.write(qconfStr)
         qconf.close()
         master.ssh.execute("qconf -Mc " + dest)
+
+    def _update_sge_msconf(self, master):
+        """
+        Set the default_runtime to 48:00:00
+        """
+        log.info("Defining default_runtime")
+        dest = "/root/qconf_msconf.qconf"
+        master.ssh.execute("export EDITOR=" + self._dcePath + "; "
+                            "export DCE_DEST=" + dest + "; "
+                            "qconf -msconf", ignore_exit_status=True)
+        qconf = master.ssh.remote_file(dest, "r")
+        qconf_lines = qconf.readlines()
+        qconf.close()
+        for i, l in enumerate(qconf_lines):
+            if l.startswith('default_duration'):
+                del qconf_lines[i]
+                break
+        qconf_lines.append("default_duration 48:00:00")
+        qconf = master.ssh.remote_file(dest, "w")
+        qconf.write("\n".join(qconf_lines))
+        qconf.close()
+        master.ssh.execute("qconf -Msconf " + dest)
 
     def _update_complex_values(self, master, node):
         """
