@@ -314,8 +314,8 @@ class SGEPlugin(clustersetup.DefaultClusterSetup):
         log.info("Adding %s to SGE" % node.alias)
         self._setup_nfs(nodes=[node], export_paths=[self.SGE_ROOT],
                         start_server=False)
-        self._add_sge_admin_host(node)
-        self._add_sge_submit_host(node)
+        # self._add_sge_admin_host(node)  # datacratic_dev disabled
+        # self._add_sge_submit_host(node) # datacratic_dev disabled
         self._add_to_sge(node)
         self._create_sge_pe()
 
