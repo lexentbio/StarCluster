@@ -91,9 +91,11 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
 
     def _update_sge_msconf(self, master):
         """
-        Set the default_runtime to 48:00:00
+        Sets
+         - default_runtime to 48:00:00
+         - max_reservation to 100
         """
-        log.info("Defining default_runtime")
+        log.info("Defining max_reservation and default_runtime")
         dest = "/root/qconf_msconf.qconf"
         master.ssh.execute("export EDITOR=" + self._dcePath + "; "
                             "export DCE_DEST=" + dest + "; "
@@ -101,10 +103,10 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
         qconf = master.ssh.remote_file(dest, "r")
         qconf_lines = qconf.readlines()
         qconf.close()
-        for i, l in enumerate(qconf_lines):
-            if l.startswith('default_duration'):
-                del qconf_lines[i]
-                break
+        def filter_fct(line):
+            return not line.startswith(('default_duration', 'max_reservation'))
+        qconf_lines = filter(filter_fct, qconf_lines)
+        qconf_lines.append("max_reservation 100")
         qconf_lines.append("default_duration 48:00:00")
         qconf = master.ssh.remote_file(dest, "w")
         qconf.write("\n".join(qconf_lines))
