@@ -730,7 +730,7 @@ class SGELoadBalancer(LoadBalancer):
             need_to_add = 1
         elif age_delta.seconds > self.longest_allowed_queue_time:
             # We don't use slots as they are biased. If a single slot/core job
-            # east up all the ram, 31 slots appear free although unusable
+            # eats up all the ram, 31 slots appear free although unusable
             log.info("A job has been waiting for %d seconds "
                      "longer than max: %d" %
                      (age_delta.seconds, self.longest_allowed_queue_time))
