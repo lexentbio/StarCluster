@@ -21,6 +21,7 @@ import time
 import datetime
 import xml.dom.minidom
 import traceback
+import math
 
 from starcluster import utils
 from starcluster import static
@@ -235,14 +236,16 @@ class SGEStats(object):
         inconsistent, this will return -1 for example, if you have m1.large and
         m1.small in the same cluster
         """
-        total = self.count_total_slots()
-        if total == 0:
-            return total
-        single = 0
-        for q in self.queues:
-            if q.startswith('all.q@'):
-                single = self.queues.get(q).get('slots')
-                break
+        # TODO make it configurable
+        return 32
+#         total = self.count_total_slots()
+#         if total == 0:
+#             return total
+#         single = 0
+#         for q in self.queues:
+#             if q.startswith('all.q@'):
+#                 single = self.queues.get(q).get('slots')
+#                 break
         # TODO datacratic custom comment
         #if (total != (single * len(self.hosts))):
         #    raise exception.BaseException(
@@ -713,34 +716,47 @@ class SGELoadBalancer(LoadBalancer):
         if not self.has_cluster_stabilized() and total_slots > 0:
             return
         running_jobs = self.stat.get_running_jobs()
-        used_slots = sum([int(j['slots']) for j in running_jobs])
-        qw_slots = sum([int(j['slots']) for j in queued_jobs])
+        # used_slots = sum([int(j['slots']) for j in running_jobs])
+        # qw_slots = sum([int(j['slots']) for j in queued_jobs])
         slots_per_host = self.stat.slots_per_host()
-        avail_slots = total_slots - used_slots
+        assert slots_per_host > 0, "Slots per host cannot be zero."
+        # avail_slots = total_slots - used_slots
         need_to_add = 0
+        oldest_job_dt = self.stat.oldest_queued_job_age()
+        now = self.get_remote_time()
+        age_delta = now - oldest_job_dt
         if num_nodes < self.min_nodes:
             log.info("Adding node: below minimum (%d)" % self.min_nodes)
             need_to_add = self.min_nodes - num_nodes
         elif total_slots == 0:
             # no slots, add one now
             need_to_add = 1
-        elif qw_slots > avail_slots:
-            log.info("Queued jobs need more slots (%d) than available (%d)" %
-                     (qw_slots, avail_slots))
-            oldest_job_dt = self.stat.oldest_queued_job_age()
-            now = self.get_remote_time()
-            age_delta = now - oldest_job_dt
-            if age_delta.seconds > self.longest_allowed_queue_time:
-                log.info("A job has been waiting for %d seconds "
-                         "longer than max: %d" %
-                         (age_delta.seconds, self.longest_allowed_queue_time))
-                if slots_per_host != 0:
-                    need_to_add = qw_slots / slots_per_host
-                else:
-                    need_to_add = 1
-            else:
-                log.info("No queued jobs older than %d seconds" %
-                         self.longest_allowed_queue_time)
+        elif age_delta.seconds > self.longest_allowed_queue_time:
+            # We don't use slots as they are biased. If a single slot/core job
+            # east up all the ram, 31 slots appear free although unusable
+            log.info("A job has been waiting for %d seconds "
+                     "longer than max: %d" %
+                     (age_delta.seconds, self.longest_allowed_queue_time))
+            slots_jobs_ratio = float(total_slots) / running_jobs
+            required_slots = queued_jobs * slots_jobs_ratio
+            need_to_add = math.ceil(required_slots / slots_per_host)
+
+#             log.info("Queued jobs need more slots (%d) than available (%d)" %
+#                      (qw_slots, avail_slots))
+#             oldest_job_dt = self.stat.oldest_queued_job_age()
+#             now = self.get_remote_time()
+#             age_delta = now - oldest_job_dt
+#             if age_delta.seconds > self.longest_allowed_queue_time:
+#                 log.info("A job has been waiting for %d seconds "
+#                          "longer than max: %d" %
+#                          (age_delta.seconds, self.longest_allowed_queue_time))
+#                 if slots_per_host != 0:
+#                     need_to_add = qw_slots / slots_per_host
+#                 else:
+#                     need_to_add = 1
+#             else:
+#                 log.info("No queued jobs older than %d seconds" %
+#                          self.longest_allowed_queue_time)
         max_add = self.max_nodes - len(self._cluster.running_nodes)
         need_to_add = min(self.add_nodes_per_iteration, need_to_add, max_add)
         if need_to_add > 0:
