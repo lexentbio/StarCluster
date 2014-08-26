@@ -735,7 +735,7 @@ class SGELoadBalancer(LoadBalancer):
                      "longer than max: %d" %
                      (age_delta.seconds, self.longest_allowed_queue_time))
             slots_jobs_ratio = float(total_slots) / len(running_jobs)
-            required_slots = queued_jobs * slots_jobs_ratio
+            required_slots = len(queued_jobs) * slots_jobs_ratio
             need_to_add = math.ceil(required_slots / slots_per_host)
         max_add = self.max_nodes - len(self._cluster.running_nodes)
         need_to_add = min(self.add_nodes_per_iteration, need_to_add, max_add)
