@@ -23,8 +23,6 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
 
     def on_add_node(self, node, nodes, master, user, user_shell, volumes):
         self._create_dce(master)
-        log.info("Setting " + node.alias + " to 1 slot")
-        self._set_node_slots(master, node.alias, 1)
         log.info("Configuring complex values for " + node.alias)
         self._update_complex_values(master, node)
 
@@ -40,8 +38,8 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
         pass
 
     def _create_dce(self, master, force=False):
+        # DCE = Datacratic Copy Editor
         if not master.ssh.path_exists(self._dcePath) or force:
-            #TODO: nice hack, complete it by doing the entire stuff remotely
             dce = master.ssh.remote_file(self._dcePath, "w")
             dce.write("#!/bin/bash\ncp $1 $DCE_DEST\n")
             dce.close()
@@ -49,7 +47,7 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
 
     def _set_node_slots(self, master, node_alias, num_slots):
         qconfPath = "/root/queueconfig.qconf"
-        #with our copy editor, the current config is printed to a file
+        # with our copy editor, the current config is printed to a file
         master.ssh.execute("export EDITOR=" + self._dcePath + "; "
                            + "chmod +x $EDITOR; "
                            + "export DCE_DEST=" + qconfPath + "; "
@@ -81,9 +79,8 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
         qconf = master.ssh.remote_file(dest, "r")
         qconfStr = qconf.read()
         qconf.close()
-        qconfStr += "da_exclusive da_excl INT <= YES YES 0 0\n"\
-            + "da_mem_gb da_mem_gb DOUBLE <= YES YES 0 0\n"\
-            + "da_slots da_slots INT <= YES YES 0 0\n"
+        qconfStr += + "da_mem_gb da_mem_gb DOUBLE <= YES YES 0 0\n"\
+                    + "da_slots da_slots INT <= YES YES 0 0\n"
         qconf = master.ssh.remote_file(dest, "w")
         qconf.write(qconfStr)
         qconf.close()
@@ -121,8 +118,7 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
                            "da_mem_gb="\
                            + str(float(node.memory) / 1000)\
                            + ",da_slots="\
-                           + str(node.num_processors)\
-                           + ",da_exclusive=1 " + node.alias)
+                           + str(node.num_processors)
 
     def recover(self, nodes, master, user, user_shell, volumes):
         pass
