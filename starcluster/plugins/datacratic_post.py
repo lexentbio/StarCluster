@@ -79,8 +79,8 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
         qconf = master.ssh.remote_file(dest, "r")
         qconfStr = qconf.read()
         qconf.close()
-        qconfStr += + "da_mem_gb da_mem_gb DOUBLE <= YES YES 0 0\n"\
-                    + "da_slots da_slots INT <= YES YES 0 0\n"
+        qconfStr += "da_mem_gb da_mem_gb DOUBLE <= YES YES 0 0\n" \
+            "da_slots da_slots INT <= YES YES 0 0\n"
         qconf = master.ssh.remote_file(dest, "w")
         qconf.write(qconfStr)
         qconf.close()
