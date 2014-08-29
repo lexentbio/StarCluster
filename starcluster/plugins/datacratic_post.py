@@ -118,7 +118,7 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
                            "da_mem_gb="\
                            + str(float(node.memory) / 1000)\
                            + ",da_slots="\
-                           + str(node.num_processors))
+                           + str(node.num_processors) + " " + node.alias)
 
     def recover(self, nodes, master, user, user_shell, volumes):
         pass
