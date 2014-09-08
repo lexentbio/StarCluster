@@ -247,10 +247,10 @@ class SGEStats(object):
 #                 single = self.queues.get(q).get('slots')
 #                 break
         # TODO datacratic custom comment
-        #if (total != (single * len(self.hosts))):
+        # if (total != (single * len(self.hosts))):
         #    raise exception.BaseException(
         #        "ERROR: Number of slots not consistent across cluster")
-        return single
+        # return single
 
     def oldest_queued_job_age(self):
         """

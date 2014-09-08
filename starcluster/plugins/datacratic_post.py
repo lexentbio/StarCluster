@@ -95,13 +95,15 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
         log.info("Defining max_reservation and default_runtime")
         dest = "/root/qconf_msconf.qconf"
         master.ssh.execute("export EDITOR=" + self._dcePath + "; "
-                            "export DCE_DEST=" + dest + "; "
-                            "qconf -msconf", ignore_exit_status=True)
+                           "export DCE_DEST=" + dest + "; "
+                           "qconf -msconf", ignore_exit_status=True)
         qconf = master.ssh.remote_file(dest, "r")
         qconf_lines = qconf.readlines()
         qconf.close()
+
         def filter_fct(line):
             return not line.startswith(('default_duration', 'max_reservation'))
+
         qconf_lines = filter(filter_fct, qconf_lines)
         qconf_lines.append("max_reservation 100")
         qconf_lines.append("default_duration 48:00:00")
@@ -114,10 +116,10 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
         """
         Sets complex values values for a node
         """
-        master.ssh.execute("qconf -rattr exechost complex_values "\
-                           "da_mem_gb="\
-                           + str(float(node.memory) / 1000)\
-                           + ",da_slots="\
+        master.ssh.execute("qconf -rattr exechost complex_values "
+                           "da_mem_gb="
+                           + str(float(node.memory) / 1000)
+                           + ",da_slots="
                            + str(node.num_processors) + " " + node.alias)
 
     def recover(self, nodes, master, user, user_shell, volumes):

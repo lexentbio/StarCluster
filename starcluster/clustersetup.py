@@ -366,8 +366,8 @@ class DefaultClusterSetup(ClusterSetup):
         nodes = nodes or self.nodes
         export_paths = export_paths or self._get_nfs_export_paths()
         # if start_server:
-            # datacratic version
-            # master.start_nfs_server()
+        #     datacratic version
+        #     master.start_nfs_server()
         if nodes:
             master.export_fs_to_nodes(nodes, export_paths)
             self._mount_nfs_shares(nodes, export_paths=export_paths)
@@ -389,12 +389,11 @@ class DefaultClusterSetup(ClusterSetup):
         for node in nodes:
             if not node.is_master():
                 self.pool.simple_job(node.setup_dns,
-                                    (self._master.private_ip_address, ),
-                                    jobid=node.alias)
+                                     (self._master.private_ip_address, ),
+                                     jobid=node.alias)
 
         if len(nodes) > 1 or not nodes[0].is_master():
             self._master.ssh.execute("pkill -HUP dnsmasq")
-
 
     def run(self, nodes, master, user, user_shell, volumes):
         """Start cluster configuration"""

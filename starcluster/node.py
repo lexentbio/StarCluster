@@ -34,8 +34,6 @@ from starcluster import managers
 from starcluster import userdata
 from starcluster import exception
 from starcluster.logger import log
-from starcluster.templates.network_interfaces \
-    import network_interfaces_template
 from starcluster.templates.resolv_conf \
     import resolv_conf_template
 
@@ -941,7 +939,6 @@ class Node(object):
 
         # required for SGE compatibility
         self.add_to_etc_hosts([self])
-
 
     @property
     def network_names(self):

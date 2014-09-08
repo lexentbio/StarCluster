@@ -26,7 +26,7 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
         node.add_tag("billcode", self.tag_billcode)
         self.update_instance_security_groups(node)
 
-        #create a 20GB swap in a background process
+        # create a 20GB swap in a background process
         log.info("Creating 20GB swap space on node " + node.alias)
         msg = node.ssh.execute("file /mnt/20GB.swap", ignore_exit_status=True)
         if msg[0].find("ERROR") != -1:
@@ -75,10 +75,9 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
             raise BaseException("Failed to find the cluster security group")
 
         # Erase all rules and create them anew
-        group_rules = list(group.rules) # copy the list because it seems to be
-                                        # updated asynchronously
+        # copy the list because it seems to be updated asynchronously
+        group_rules = list(group.rules)
         for ip_permission in group_rules:
-            src_group = None
             revoke = partial(group.revoke,
                              ip_protocol=ip_permission.ip_protocol,
                              from_port=ip_permission.from_port,
@@ -113,14 +112,13 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
                             to_port='-1',
                             src_group=grp_lst[0])
 
-
     def update_instance_security_groups(self, node):
         """
         Adds the configured security groups to a node
         """
         groups = [str(g.id) for g in node.instance.groups] \
             + self.security_groups
-        log.info("Updating {} security groups to {}" \
+        log.info("Updating {} security groups to {}"
                  .format(node.short_alias, groups))
         rez = node.ec2.conn.modify_instance_attribute(node.instance.id,
                                                       "groupSet",

@@ -135,7 +135,7 @@ class SGEPlugin(clustersetup.DefaultClusterSetup):
         StarCluster
         """
         master = self._master
-        if True: # or not master.ssh.isdir(self.SGE_ROOT):
+        if True:  # or not master.ssh.isdir(self.SGE_ROOT):
             # copy fresh sge installation files to SGE_ROOT
             master.ssh.execute('rm -rf %s' % (self.SGE_ROOT))
             master.ssh.execute('cp -r %s %s' % (self.SGE_FRESH, self.SGE_ROOT))
