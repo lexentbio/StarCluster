@@ -246,6 +246,7 @@ class SGEPlugin(clustersetup.DefaultClusterSetup):
             log.info("Nothing to clean")
 
         alive_nodes = [node.short_alias for node in nodes]
+        alive_queues = ["all.q@" + node.alias for node in nodes]
 
         cleaned = []
         # find dead hosts
@@ -264,7 +265,7 @@ class SGEPlugin(clustersetup.DefaultClusterSetup):
         for c in cleaned:
             cleaned_queue.append("all.q@" + c)
         for job_list in qstats_et.find("queue_info").findall("job_list"):
-            if job_list.find("queue_name").text in cleaned_queue:
+            if job_list.find("queue_name").text not in alive_queues:
                 job_number = job_list.find("JB_job_number").text
                 to_delete.append(job_number)
         for job_list in qstats_et.find("job_info").findall("job_list"):
