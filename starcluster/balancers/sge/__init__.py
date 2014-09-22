@@ -734,9 +734,15 @@ class SGELoadBalancer(LoadBalancer):
             log.info("A job has been waiting for %d seconds "
                      "longer than max: %d" %
                      (age_delta.seconds, self.longest_allowed_queue_time))
-            slots_jobs_ratio = float(total_slots) / len(running_jobs)
-            required_slots = len(queued_jobs) * slots_jobs_ratio
-            need_to_add = int(math.ceil(required_slots / slots_per_host))
+            if running_jobs:
+                slots_jobs_ratio = float(total_slots) / len(running_jobs)
+                required_slots = len(queued_jobs) * slots_jobs_ratio
+                need_to_add = int(math.ceil(required_slots / slots_per_host))
+            else:
+                log.info("Existing nodes are not running jobs, hence "
+                         "StarCluster cannot make a reliable estimate.")
+                need_to_add = 1
+
         max_add = self.max_nodes - len(self._cluster.running_nodes)
         need_to_add = min(self.add_nodes_per_iteration, need_to_add, max_add)
         if need_to_add > 0:
