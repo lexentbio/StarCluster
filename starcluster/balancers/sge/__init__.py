@@ -885,7 +885,7 @@ class SGELoadBalancer(LoadBalancer):
         for j in self.stat.get_queued_jobs():
             st = j['JB_submission_time']
             dt = utils.iso_to_datetime_tuple(st)
-            dt.replace(tzinfo=self.remote_tzinfo)
+            dt.replace(tzinfo=self.stat.remote_tzinfo)
             if (now - dt).seconds > self.longest_allowed_queue_time:
                 jobs_waiting_for_too_long += 1
         return jobs_waiting_for_too_long
