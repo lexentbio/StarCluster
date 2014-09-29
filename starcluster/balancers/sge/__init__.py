@@ -735,8 +735,11 @@ class SGELoadBalancer(LoadBalancer):
                      "longer than max: %d" %
                      (age_delta.seconds, self.longest_allowed_queue_time))
             if running_jobs:
+                count = self.count_queued_jobs_waiting_for_too_long()
+                assert count > 0, \
+                    "There should be 1 or more jobs waiting for too long."
                 slots_jobs_ratio = float(total_slots) / len(running_jobs)
-                required_slots = len(queued_jobs) * slots_jobs_ratio
+                required_slots = count * slots_jobs_ratio
                 need_to_add = int(math.ceil(required_slots / slots_per_host))
             else:
                 log.info("Existing nodes are not running jobs, hence "
@@ -875,3 +878,14 @@ class SGELoadBalancer(LoadBalancer):
         now = self.get_remote_time()
         timedelta = now - dt
         return timedelta.seconds / 60
+
+    def count_queued_jobs_waiting_for_too_long(self):
+        jobs_waiting_for_too_long = 0
+        now = self.get_remote_time()
+        for j in self.stat.get_queued_jobs():
+            st = j['JB_submission_time']
+            dt = utils.iso_to_datetime_tuple(st)
+            dt.replace(tzinfo=self.stat.remote_tzinfo)
+            if (now - dt).seconds > self.longest_allowed_queue_time:
+                jobs_waiting_for_too_long += 1
+        return jobs_waiting_for_too_long
