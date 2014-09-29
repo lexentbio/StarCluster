@@ -882,7 +882,7 @@ class Node(object):
         host_file_lines = host_file.read().split("\n")
         host_file.close()
         host_file_lines = \
-        filter(lambda line: not expr.findall(line), host_file_lines)
+            filter(lambda line: not expr.findall(line), host_file_lines)
         for node in nodes:
             host_file_lines.append(node.get_hosts_entry())
 
