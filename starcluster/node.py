@@ -882,12 +882,13 @@ class Node(object):
         host_file_lines = host_file.read().split("\n")
         host_file.close()
         host_file_lines = \
-            filter(lambda line: not expr.findall(line), host_file_lines)
+        filter(lambda line: bool(line) and not expr.findall(line),
+               host_file_lines)
         for node in nodes:
             host_file_lines.append(node.get_hosts_entry())
 
         host_file = self.ssh.remote_file('/etc/hosts', 'w')
-        print >> host_file, "\n".join(host_file_lines),
+        print >> host_file, "\n".join(host_file_lines)
         host_file.close()
 
     def remove_from_etc_hosts(self, nodes):
