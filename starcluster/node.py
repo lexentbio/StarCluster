@@ -874,16 +874,17 @@ class Node(object):
         """
         Adds all names for node in nodes arg to this node's /etc/hosts file
         """
-        to_clean = [n.alias + "|" + n.private_ip_address.replace(".", "\.")
-                    for n in nodes]
+        to_clean = \
+            [n.short_alias + "|" + n.private_ip_address.replace(".", "\.")
+             for n in nodes]
         expr = re.compile("|".join(to_clean))
 
         host_file = self.ssh.remote_file('/etc/hosts', 'r')
         host_file_lines = host_file.read().split("\n")
         host_file.close()
         host_file_lines = \
-        filter(lambda line: bool(line) and not expr.findall(line),
-               host_file_lines)
+            filter(lambda line: bool(line) and not expr.findall(line),
+                   host_file_lines)
         for node in nodes:
             host_file_lines.append(node.get_hosts_entry())
 
