@@ -74,7 +74,7 @@ class TestSGELoadBalancer(StarClusterTest):
         assert len(stat.queues) == 10
         assert stat.count_total_slots() == 80
         stat.parse_qhost(sge_balancer.loaded_qhost_xml)
-        #assert stat.slots_per_host() == 8
+        # assert stat.slots_per_host() == 8
 
     def test_node_working(self):
         # TODO : FINISH THIS
