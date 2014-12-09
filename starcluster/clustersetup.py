@@ -18,7 +18,6 @@
 """
 clustersetup.py
 """
-import os
 import posixpath
 import datetime
 
