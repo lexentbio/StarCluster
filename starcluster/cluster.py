@@ -68,8 +68,14 @@ class ClusterManager(managers.Manager):
                          cluster_group=group)
 
             # Useful when config is on master node
-            cl.key_location = \
-                self.cfg.get_key(cl.master_node.key_name).get('key_location')
+            try:
+                cl.key_location = \
+                    self.cfg.get_key(cl.master_node.key_name)\
+                        .get('key_location')
+            except (exception.KeyNotFound, exception.MasterDoesNotExist):
+                if require_keys:
+                    raise
+                cl.key_location = ''
 
             if load_receipt:
                 cl.load_receipt(load_plugins=load_plugins,
@@ -845,16 +851,21 @@ class Cluster(object):
 
     @property
     def nodes(self):
-        states = ['pending', 'running', 'stopping', 'stopped']
+        states = ['pending', 'running']
         filters = {'instance-state-name': states,
                    'instance.group-name': self._security_group}
         nodes = self.ec2.get_all_instances(filters=filters)
 
-        def filterFct(n):
-            return n.spot_instance_request_id is None or \
-                n.state in ["running", "pending"]
+        def filter_fct(n):
+            if n.spot_instance_request_id is not None:
+                return False
+            if self._security_group in [g.name for g in node.groups]:
+                return True
+            log.warning("EC2 issue? Got instance not in security group. "
+                        "Filtering out.")
+            return False
+        nodes = filter(filter_fct, nodes)
 
-        nodes = filter(filterFct, nodes)  # filter stopping/stopped spot
         # remove any cached nodes not in the current node list from EC2
         current_ids = [n.id for n in nodes]
 
@@ -1960,10 +1971,13 @@ class Cluster(object):
                           command=command)
 
     def get_impaired_nodes(self):
-        impaired_statuses = self.ec2.conn.get_all_instance_status(
-            instance_ids=[node.id for node in self.nodes],
-            filters={"instance-status.status": "impaired"}
-        )
+        impaired_statuses = []
+        node_ids = [node.id for node in self.nodes]
+        for instance_id_batch in utils.chunk_list(node_ids, 100):
+            impaired_statuses.extend(self.ec2.conn.get_all_instance_status(
+                instance_ids=instance_id_batch,
+                filters={"instance-status.status": "impaired"}
+            ))
         impaired_nodes_ids = [impaired.id for impaired in impaired_statuses]
         return [node for node in self.nodes if node.id in impaired_nodes_ids]
 
