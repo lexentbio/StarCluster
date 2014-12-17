@@ -878,7 +878,6 @@ class Node(object):
 
         with self.ssh.remote_file('/etc/hosts', 'w') as host_file:
             print >> host_file, "\n".join(host_file_lines)
-            host_file.close()
 
     @classmethod
     def filter_etc_hosts_lines(cls, nodes, lines):
