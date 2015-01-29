@@ -254,10 +254,11 @@ class SGEStats(object):
 
     def oldest_queued_job_age(self):
         """
-        This returns the age of the oldest job in the queue
+        This returns the age of the oldest job in the queue in normal waiting
+        state
         """
         for j in self.jobs:
-            if 'JB_submission_time' in j:
+            if 'JB_submission_time' in j and j['state'] == 'qw':
                 st = j['JB_submission_time']
                 dt = utils.iso_to_datetime_tuple(st)
                 return dt.replace(tzinfo=self.remote_tzinfo)
@@ -667,7 +668,7 @@ class SGELoadBalancer(LoadBalancer):
             log.info("Avg job wait time: %d secs" % self.stat.avg_wait_time(),
                      extra=raw)
             log.info("Last cluster modification time: %s" %
-                     self.__last_cluster_mod_time.strftime("%Y-%m-%d %X%z"),
+                     self.__last_cluster_mod_time.isoformat(),
                      extra=dict(__raw__=True))
             # evaluate if nodes need to be added
             skip_sleep = self._eval_add_node()
@@ -689,9 +690,9 @@ class SGELoadBalancer(LoadBalancer):
             if not skip_sleep:
                 log.info("Sleeping...(looping again in %d secs)\n" %
                          self.polling_interval)
-                log.info("Sleeping, it's " + str(datetime.datetime.utcnow()))
+                log.info("Sleeping, it's " + utils.get_utc_now().isoformat())
                 time.sleep(self.polling_interval)
-                log.info("Waking up, it's " + str(datetime.datetime.utcnow()))
+                log.info("Waking up, it's " + utils.get_utc_now().isoformat())
 
     def has_cluster_stabilized(self):
         now = utils.get_utc_now()
