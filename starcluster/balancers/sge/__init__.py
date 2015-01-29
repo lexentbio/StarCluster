@@ -899,6 +899,9 @@ class SGELoadBalancer(LoadBalancer):
         jobs_waiting_for_too_long = 0
         now = self.get_remote_time()
         for j in self.stat.get_queued_jobs():
+            if j['state'] != 'qw':
+                # Ignore jobs on non normal waiting state
+                continue
             st = j['JB_submission_time']
             dt = utils.iso_to_datetime_tuple(st)
             dt.replace(tzinfo=self.stat.remote_tzinfo)
