@@ -1092,6 +1092,10 @@ class Cluster(object):
                 log.info("Reverting to \"no zone\" as the min price is "
                          "above the spot bid.")
                 zone = None
+        elif zone is None:
+            # Make sure master is in the same zone as the volumes mounted by
+            # the cluster.
+            zone = getattr(self.zone, 'name', None)
 
         image_id = image_id or self.node_image_id
         count = len(aliases) if not spot_bid else 1

@@ -310,7 +310,12 @@ class SGEPlugin(clustersetup.DefaultClusterSetup):
                 rfile = master.ssh.remote_file("/etc/hosts", 'a')
                 rfile.write("\n1.1.1.1 " + c)
                 rfile.close()
-            self._remove_from_sge(DeadNode(c), only_clean_master=True)
+
+            try:
+                self._remove_from_sge(DeadNode(c), only_clean_master=True)
+            except RemoteCommandFailed:
+                log.warning("Failed to remove node {} from sge."
+                            .format(c.alias), exc_info=True)
 
         # fix to allow pickling
         self._master = None
