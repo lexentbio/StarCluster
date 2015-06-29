@@ -5,7 +5,8 @@ vanilla_improvements notes are at the bottom.
 
 :StarCluster: Cluster Computing Toolkit for the Cloud
 :Version: 0.95.6
-:Author: Justin Riley <justin.t.riley@gmail.com>
+:Author (trunk): Justin Riley <justin.t.riley@gmail.com>
+:Author (vanilla improvements): François-Michel L'Heureux <fmlheureux@datacratic.com>
 :Team: Software Tools for Academics and Researchers (http://star.mit.edu)
 :Homepage: http://star.mit.edu/cluster
 :License: LGPL
@@ -232,6 +233,7 @@ Note that all the listed commits are only there for references and may contain i
   - Streaming the process by adding nodes as soon as they are ready instead of waiting for all of them. (`Pull Request 434`_)
   - Removed some remote read/writes (very slow) and replaced them get/edit/push.
   - Cancels spot instances requests going to state "bid-too-low" or "capacity-oversubscribed", which avoids StarCluster to look frozen while waiting endlessly for them to become active. (`Commit f4c4d0`_)
+  - Ability to configure various node instance types with a "selection factor". The call to add node will then pick the type to use in function of the spot market prices and the "selection factor". See the wiki page `Various Node Types Support`_ for instructions. (`Pull Request 18`_)
 * Support for multiple subnets - Via the cluster template, allows to get spot instances in the cheapest zone.
   Dropped the --subnet-id start command flag. (`Commit 0824e3`_)
 * Adds a mode where the cluster configuration is written to master:/etc/starcluster. To activate, simply add flag 
@@ -244,6 +246,7 @@ Note that all the listed commits are only there for references and may contain i
       + No longer possible to start a stopped cluster via StarCluster. (This is technically fixable, but not planned at the moment.)
 * Adds a --dns-sufix flag to the start command. (`Commit 72f3bc`_)
 * The runplugin command supports additional arguments. Useful to create StarCluster related tools. (`Commit c3e097`_)
+* Reuse node ids when adding nodes to avoid growing over 999 and crashing. (`Commit a86c5a`_)
 .. _robbyt: https://github.com/robbyt 
 .. _pull request: https://github.com/jtriley/StarCluster/pull/123
 .. _Commit 0824e3: https://github.com/datacratic/StarCluster/commit/0824e39c5d1fd6f5379a433cba575d808daee471
@@ -253,3 +256,6 @@ Note that all the listed commits are only there for references and may contain i
 .. _Pull Request 434: https://github.com/jtriley/StarCluster/pull/434
 .. _Commit f4c4d0: https://github.com/datacratic/StarCluster/commit/f4c4d05cb48f7395ca41332c12188050122eb308
 .. _Commit c58253: https://github.com/datacratic/StarCluster/commit/c58253a0a05e6209ab82232ebdd151c771389238
+.. _Pull Request 18: https://github.com/datacratic/StarCluster/pull/18
+.. _Various Node Types Support: https://github.com/datacratic/StarCluster/wiki/Various-Node-Types-Support
+.. _Commit a86c5a: https://github.com/datacratic/StarCluster/commit/a86c5a8bce6fbe2ff4384c031853041a89bbdbb5
