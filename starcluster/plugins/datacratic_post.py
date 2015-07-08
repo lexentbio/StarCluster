@@ -129,8 +129,8 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
           - s_core: Limit core file size
         """
 
-        s_core = 64 * 1024 * 1024  # 64mb
-        master.ssh.execute('qconf -mattr queue s_core "%s" all.q' % s_core)
+        # Disable core dumps by default
+        master.ssh.execute('qconf -mattr queue s_core "0" all.q')
 
     def recover(self, nodes, master, user, user_shell, volumes):
         pass
