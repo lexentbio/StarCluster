@@ -16,6 +16,7 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
         self._set_node_slots(master, master.alias, 0)
         self._create_complex_values(master)
         self._update_sge_msconf(master)
+        self._update_allq_attrs(master)
         log.info("******")
         log.info("You need to run salt over the master node before adding "
                  "slave nodes.")
@@ -121,6 +122,15 @@ class DatacraticPostPlugin(clustersetup.DefaultClusterSetup):
                            + str(float(node.memory) / 1000)
                            + ",da_slots="
                            + str(node.num_processors) + " " + node.alias)
+
+    def _update_allq_attrs(self, master):
+        """
+        Sets allq attributes:
+          - s_core: Limit core file size
+        """
+
+        s_core = 64 * 1024 * 1024  # 64mb
+        master.ssh.execute('qconf -mattr queue s_core "%s" all.q' % s_core)
 
     def recover(self, nodes, master, user, user_shell, volumes):
         pass
