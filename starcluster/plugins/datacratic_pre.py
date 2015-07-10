@@ -34,9 +34,10 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
         log.info("Creating /mnt/s3cache")
         msg = node.ssh.execute("file /mnt/s3cache", ignore_exit_status=True)
         if msg[0].find("ERROR") == -1:
-                log.warning("/mnt/s3Cache already exists")
+            log.warning("/mnt/s3Cache already exists")
         else:
-                node.ssh.execute("install -d -m 1777 /mnt/s3cache")
+            node.ssh.execute("install -d -m 1777 /mnt/s3cache")
+        node.ssh.execute("start diamond")
 
     def on_remove_node(self, node, nodes, master, user, user_shell, volumes):
         pass
