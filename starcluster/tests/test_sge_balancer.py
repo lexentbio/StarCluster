@@ -208,9 +208,9 @@ class TestSGELoadBalancer(StarClusterTest):
         set_job_to_running(2)
 
         # now there are 4 waiting jobs, 3 running ones, avg slot per job is
-        # 63 / 3 = 21
-        # 4 jobs * 21  = 84
-        # ceil(84 / 32) = 3
+        # 64 / 3 = 21.3
+        # 4 jobs * 21.3  = 85.3
+        # ceil(85.3 / 32) = 3
         avg_job_duration = 3600
         assert balancer._eval_required_instances() == 3
 
