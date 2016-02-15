@@ -706,25 +706,23 @@ class SGELoadBalancer(LoadBalancer):
             log.info("Waiting for cluster to stabilize...")
         return is_stabilized
 
-    def _eval_add_node(self):
-        """
-        This function inspects the current state of the SGE queue and decides
-        whether or not to add nodes to the cluster. Returns the number of nodes
-        to add.
-        """
-        num_nodes = len(self._cluster.nodes)
+    def _eval_required_instances(self):
+        num_nodes = len(self.stat.hosts)
         if num_nodes >= self.max_nodes:
-            log.info("Not adding nodes: already at or above maximum (%d)" %
+            log.info("Not requiring nodes: already at or above maximum (%d)" %
                      self.max_nodes)
-            return False
+            return 0
+
         queued_jobs = self.stat.get_queued_jobs()
         if not queued_jobs and num_nodes >= self.min_nodes:
-            log.info("Not adding nodes: at or above minimum nodes "
+            log.info("Not requiring nodes: at or above minimum nodes "
                      "and no queued jobs...")
-            return False
+            return 0
+
         total_slots = self.stat.count_total_slots()
         if not self.has_cluster_stabilized() and total_slots > 0:
-            return False
+            return 0
+
         running_jobs = self.stat.get_running_jobs()
         slots_per_host = self.stat.slots_per_host()
         assert slots_per_host > 0, "Slots per host cannot be zero."
@@ -749,22 +747,31 @@ class SGELoadBalancer(LoadBalancer):
                 assert count > 0, \
                     "There should be 1 or more jobs waiting for too long."
                 slots_jobs_ratio = float(total_slots) / len(running_jobs)
-                avg_job_duration_h = min(1,
-                                         self.stat.avg_job_duration() / 3600.0)
+                avg_job_duration = self.stat.avg_job_duration() or 3600
+                avg_job_duration_h = min(1, avg_job_duration / 3600.0)
                 required_slots = count * avg_job_duration_h * slots_jobs_ratio
                 need_to_add = int(math.ceil(required_slots / slots_per_host))
+                assert need_to_add > 0
             else:
                 log.info("Existing nodes are not running jobs, hence "
                          "StarCluster cannot make a reliable estimate.")
                 need_to_add = 1
 
-        max_add = self.max_nodes - len(self._cluster.running_nodes)
-        need_to_add = min(self.add_nodes_per_iteration, need_to_add, max_add)
-        if need_to_add < 1:
-            return False
+        max_add = self.max_nodes - num_nodes
+        return min(self.add_nodes_per_iteration, need_to_add, max_add)
 
+    def _eval_add_node(self):
+        """
+        This function inspects the current state of the SGE queue and decides
+        whether or not to add nodes to the cluster. Returns the number of nodes
+        to add.
+        """
+        need_to_add = self._eval_required_slots_hour()
+        if need_to_add == 0:
+            return False
         log.warn("Adding %d nodes at %s" %
                  (need_to_add, str(utils.get_utc_now())))
+        num_nodes = len(self.stat.hosts)
         try:
             self._cluster.add_nodes(need_to_add,
                                     reboot_interval=self.reboot_interval,
