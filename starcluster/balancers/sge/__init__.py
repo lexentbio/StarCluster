@@ -749,7 +749,9 @@ class SGELoadBalancer(LoadBalancer):
                 assert count > 0, \
                     "There should be 1 or more jobs waiting for too long."
                 slots_jobs_ratio = float(total_slots) / len(running_jobs)
-                required_slots = count * slots_jobs_ratio
+                avg_job_duration_h = min(1,
+                                         self.stat.avg_job_duration() / 3600.0)
+                required_slots = count * avg_job_duration_h * slots_jobs_ratio
                 need_to_add = int(math.ceil(required_slots / slots_per_host))
             else:
                 log.info("Existing nodes are not running jobs, hence "
