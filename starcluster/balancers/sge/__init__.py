@@ -766,7 +766,7 @@ class SGELoadBalancer(LoadBalancer):
         whether or not to add nodes to the cluster. Returns the number of nodes
         to add.
         """
-        need_to_add = self._eval_required_slots_hour()
+        need_to_add = self._eval_required_instances()
         if need_to_add == 0:
             return False
         log.warn("Adding %d nodes at %s" %
