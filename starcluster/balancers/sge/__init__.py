@@ -747,9 +747,19 @@ class SGELoadBalancer(LoadBalancer):
                 assert count > 0, \
                     "There should be 1 or more jobs waiting for too long."
                 slots_jobs_ratio = float(total_slots) / len(running_jobs)
-                avg_job_duration = self.stat.avg_job_duration() or 3600
-                avg_job_duration_h = min(1, avg_job_duration / 3600.0)
-                required_slots = count * avg_job_duration_h * slots_jobs_ratio
+                #
+                # deactivated - calculate required instances by weighting in
+                # the average job runtime. As our runtime metric is below 8
+                # seconds (likely broken) we would end up adding nodes one by
+                # one. Part of test_eval_required_instances was disabled to
+                # reflect that.
+                #
+                # avg_job_duration = self.stat.avg_job_duration() or 3600
+                # avg_job_duration_h = min(1, avg_job_duration / 3600.0)
+                # required_slots = \
+                #    count * avg_job_duration_h * slots_jobs_ratio
+                #
+                required_slots = count * slots_jobs_ratio
                 need_to_add = int(math.ceil(required_slots / slots_per_host))
                 assert need_to_add > 0
             else:

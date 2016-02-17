@@ -193,26 +193,30 @@ class TestSGELoadBalancer(StarClusterTest):
         # now there are 6 waiting jobs
         assert balancer._eval_required_instances() == 6
 
-        avg_job_duration = 1800
-        assert balancer._eval_required_instances() == 3
+        if False:
+            # avg_job_duration was removed as a weithg factor because the
+            # metric returned by OGSStat is currently 8 seconds, which would
+            # mean we would end up adding nodes one by one.
+            avg_job_duration = 1800
+            assert balancer._eval_required_instances() == 3
 
-        avg_job_duration = 1700
-        assert balancer._eval_required_instances() == 3
+            avg_job_duration = 1700
+            assert balancer._eval_required_instances() == 3
 
-        avg_job_duration = 100
-        assert balancer._eval_required_instances() == 1
+            avg_job_duration = 100
+            assert balancer._eval_required_instances() == 1
 
-        add_host()
-        total_slots += 32
-        set_job_to_running(1)
-        set_job_to_running(2)
+            add_host()
+            total_slots += 32
+            set_job_to_running(1)
+            set_job_to_running(2)
 
-        # now there are 4 waiting jobs, 3 running ones, avg slot per job is
-        # 64 / 3 = 21.3
-        # 4 jobs * 21.3  = 85.3
-        # ceil(85.3 / 32) = 3
-        avg_job_duration = 3600
-        assert balancer._eval_required_instances() == 3
+            # now there are 4 waiting jobs, 3 running ones, avg slot per job is
+            # 64 / 3 = 21.3
+            # 4 jobs * 21.3  = 85.3
+            # ceil(85.3 / 32) = 3
+            avg_job_duration = 3600
+            assert balancer._eval_required_instances() == 3
 
-        avg_job_duration = 1200
-        assert balancer._eval_required_instances() == 1
+            avg_job_duration = 1200
+            assert balancer._eval_required_instances() == 1
