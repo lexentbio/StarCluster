@@ -83,7 +83,7 @@ class DatacraticPrePlugin(clustersetup.DefaultClusterSetup):
             log.warning("Group rule removal probably failed")
             revoke()
 
-        # Create the rules we want
+        # Create the rules we want - only works in a VPC
         # All within this cluster
         group.authorize(ip_protocol='-1',
                         from_port='-1',
