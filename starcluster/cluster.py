@@ -2207,6 +2207,7 @@ class Cluster(object):
                 k, v = part.split('=')
                 vals[k] = float(v)
             res[i['instance_type']] = vals
+        return res
 
 
 class ClusterValidator(validators.Validator):
