@@ -595,8 +595,8 @@ class SGELoadBalancer(LoadBalancer):
         qacct_cmd = 'qacct -j -b ' + qatime
         qstat_cmd = 'qstat -u \* -xml -f -r'
         qhost_cmd = 'qhost -xml'
-        if self.supported_complex_values:
-            qhost_cmd += ' -F ' + ' '.join(self.supported_complex_values)
+        if self._supported_complex_values:
+            qhost_cmd += ' -F ' + ' '.join(self._supported_complex_values)
         qhostxml = '\n'.join(master.ssh.execute(qhost_cmd))
         qstatxml = '\n'.join(master.ssh.execute(qstat_cmd))
         try:
