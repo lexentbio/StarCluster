@@ -19,6 +19,7 @@ import iso8601
 import datetime
 
 from starcluster import utils
+from starcluster.complex_values import ComplexValues
 from starcluster.balancers import sge
 from starcluster.balancers.sge import SGEJob
 from starcluster.tests import StarClusterTest
@@ -113,7 +114,7 @@ class TestSGELoadBalancer(StarClusterTest):
         balancer._stat = stat
         balancer_mock = SGEBalancerMock(balancer)
 
-        assert balancer._eval_required_instances() == 0
+        assert balancer._eval_required_instances() == (0, [])
 
         stat.jobs = [SGEJob({
             'job_state': u'pending',
@@ -127,10 +128,10 @@ class TestSGELoadBalancer(StarClusterTest):
             u'slots': u'1'
         })]
 
-        assert balancer._eval_required_instances() == 1
+        assert balancer._eval_required_instances()[0] == 1
 
-        def add_host():
-            stat.hosts.append({
+        def add_host(name):
+            stat.hosts[name] = {
                 u'swap_used': u'0.0',
                 u'arch_string': u'lx24-amd64',
                 'name': u'domU-12-31-39-0B-C4-61.compute-1.internal',
@@ -139,9 +140,9 @@ class TestSGELoadBalancer(StarClusterTest):
                 u'mem_used': u'997.4M',
                 u'mem_total': u'7.0G',
                 u'load_avg': u'8.32'
-            })
+            }
 
-        add_host()
+        add_host('host1')
         balancer_mock.count_total_slots += 32
 
         def set_job_to_running(idx):
@@ -153,7 +154,7 @@ class TestSGELoadBalancer(StarClusterTest):
             })
 
         set_job_to_running(0)
-        assert balancer._eval_required_instances() == 0
+        assert balancer._eval_required_instances() == (0, [])
 
         def add_pending_job():
             stat.jobs.append(SGEJob({
@@ -171,50 +172,50 @@ class TestSGELoadBalancer(StarClusterTest):
         add_pending_job()
 
         # job not waiting for long enough
-        assert balancer._eval_required_instances() == 0
+        assert balancer._eval_required_instances() == (0, [])
 
         # waiting for long enough
         balancer_mock.current_time = '2010-06-18T23:59:25'
-        assert balancer._eval_required_instances() == 1
+        assert balancer._eval_required_instances()[0] == 1
 
         # avg_job_duration has no effect at that point
         balancer_mock.avg_job_duration = 3600
-        assert balancer._eval_required_instances() == 1
+        assert balancer._eval_required_instances()[0] == 1
         balancer_mock.avg_job_duration = 1
-        assert balancer._eval_required_instances() == 1
+        assert balancer._eval_required_instances()[0] == 1
 
         balancer_mock.has_cluster_stabilized = False
-        assert balancer._eval_required_instances() == 0
+        assert balancer._eval_required_instances() == (0, [])
 
         add_pending_job()
         balancer_mock.has_cluster_stabilized = True
         for d in [0, 3600, 999999]:
             balancer_mock.avg_job_duration = d
-            assert balancer._eval_required_instances() == 1
+            assert balancer._eval_required_instances()[0] == 1
 
         balancer.add_nodes_per_iteration = 10
-        assert balancer._eval_required_instances() == 2
+        assert balancer._eval_required_instances()[0] == 2
 
         for _ in xrange(4):
             add_pending_job()
 
         # now there are 6 waiting jobs
-        assert balancer._eval_required_instances() == 6
+        assert balancer._eval_required_instances()[0] == 6
 
         if False:
             # avg_job_duration was removed as a weithg factor because the
             # metric returned by OGSStat is currently 8 seconds, which would
             # mean we would end up adding nodes one by one.
             balancer_mock.avg_job_duration = 1800
-            assert balancer._eval_required_instances() == 3
+            assert balancer._eval_required_instances()[0] == 3
 
             balancer_mock.avg_job_duration = 1700
-            assert balancer._eval_required_instances() == 3
+            assert balancer._eval_required_instances()[0] == 3
 
             balancer_mock.avg_job_duration = 100
-            assert balancer._eval_required_instances() == 1
+            assert balancer._eval_required_instances()[0] == 1
 
-            add_host()
+            add_host('host2')
             balancer_mock.count_total_slots += 32
             set_job_to_running(1)
             set_job_to_running(2)
@@ -224,10 +225,10 @@ class TestSGELoadBalancer(StarClusterTest):
             # 4 jobs * 21.3  = 85.3
             # ceil(85.3 / 32) = 3
             balancer_mock.avg_job_duration = 3600
-            assert balancer._eval_required_instances() == 3
+            assert balancer._eval_required_instances()[0] == 3
 
             balancer_mock.avg_job_duration = 1200
-            assert balancer._eval_required_instances() == 1
+            assert balancer._eval_required_instances()[0] == 1
 
     def test_loaded_qstat_parser_complex_values(self):
         stat = sge.SGEStats()
@@ -246,14 +247,14 @@ class TestSGELoadBalancer(StarClusterTest):
     def test_queued_job_request_too_many_resources(self):
         stat = sge.SGEStats()
         node_complex_values = {
-            'smallNode': {
+            'smallNode': ComplexValues({
                 'da_mem_gb': 1,
                 'da_slots': 1
-            },
-            'mediumNode': {
+            }),
+            'mediumNode': ComplexValues({
                 'da_mem_gb': 8,
                 'da_slots': 4
-            }
+            })
         }
 
         balancer = sge.SGELoadBalancer(
@@ -281,12 +282,13 @@ class TestSGELoadBalancer(StarClusterTest):
         }))
         res = balancer.get_jobs_instances_support(stat.jobs)
         assert len(res['unfulfillable']) == 0
-        assert balancer._eval_required_instances() == 1
+        assert balancer._eval_required_instances() == \
+            (1, ['smallNode', 'mediumNode'])
 
         stat.jobs[0]['hard_request']['da_slots'] = 10
         res = balancer.get_jobs_instances_support(stat.jobs)
         assert len(res['unfulfillable']) == 1
-        assert balancer._eval_required_instances() == 0
+        assert balancer._eval_required_instances()[0] == 0
 
         stat.jobs.append(SGEJob({
             'job_state': u'pending',
@@ -302,16 +304,240 @@ class TestSGELoadBalancer(StarClusterTest):
                 'da_slots': 1
             }
         }))
-        assert balancer._eval_required_instances() == 1
+        assert balancer._eval_required_instances() == \
+            (1, ['smallNode', 'mediumNode'])
 
         stat.jobs[1]['hard_request']['irrelevant'] = 999
-        assert balancer._eval_required_instances() == 1
+        assert balancer._eval_required_instances() == \
+            (1, ['smallNode', 'mediumNode'])
 
         stat.jobs[1]['hard_request']['da_mem_gb'] = 1
-        assert balancer._eval_required_instances() == 1
+        assert balancer._eval_required_instances() == \
+            (1, ['smallNode', 'mediumNode'])
 
         stat.jobs[1]['hard_request']['da_mem_gb'] = 8
-        assert balancer._eval_required_instances() == 1
+        assert balancer._eval_required_instances() == (1, ['mediumNode'])
 
         stat.jobs[1]['hard_request']['da_mem_gb'] = 8.1
-        assert balancer._eval_required_instances() == 0
+        assert balancer._eval_required_instances()[0] == 0
+
+    def test_find_nodes_for_removal_base(self):
+        """
+        Base means no mixed node types, no complex values
+        """
+        class ClusterMock(object):
+            pass
+
+        class NodeMock(object):
+            def __init__(self, alias, launch_time):
+                self.alias = alias
+                self.id = alias
+                self.launch_time = launch_time
+
+            def is_master(self):
+                return False
+
+        stat = sge.SGEStats()
+        balancer = sge.SGELoadBalancer(wait_time=900)
+        balancer._stat = stat
+        balancer_mock = SGEBalancerMock(balancer)
+        cluster_mock = ClusterMock()
+        cluster_mock.running_nodes = [NodeMock('host1', '2010-06-18T23:00:00')]
+        balancer._cluster = cluster_mock
+
+        stat.hosts['host1'] = {
+            u'swap_used': u'0.0',
+            u'arch_string': u'lx24-amd64',
+            'name': u'host1',
+            u'swap_total': u'0.0',
+            u'num_proc': u'32',
+            u'mem_used': u'997.4M',
+            u'mem_total': u'7.0G',
+            u'load_avg': u'8.32'
+        }
+        remove_nodes = balancer._find_nodes_for_removal()
+        assert not remove_nodes, "Too soon, nothing should be removed"
+
+        # waiting for long enough
+        balancer_mock.current_time = '2010-06-18T23:59:25'
+        remove_nodes = balancer._find_nodes_for_removal()
+        assert remove_nodes[0].alias == 'host1'
+
+        stat.jobs.append(SGEJob({
+            'job_state': u'pending',
+            'queue_name': u'all.q@host1',
+            u'JB_job_number': unicode(len(stat.jobs) + 1),
+            u'JB_owner': u'root',
+            u'state': u'qw',
+            u'JAT_prio': u'0.55500',
+            u'JB_name': u'sleep',
+            u'JB_submission_time': u'2010-06-18T23:39:24',
+            u'slots': u'1'
+        }))
+        remove_nodes = balancer._find_nodes_for_removal()
+        assert not remove_nodes, "job running on it, nothing should be removed"
+
+        name = 'host2'
+        cluster_mock.running_nodes.append(NodeMock(name,
+                                                   '2010-06-18T23:00:00'))
+        stat.hosts[name] = {
+            u'swap_used': u'0.0',
+            u'arch_string': u'lx24-amd64',
+            'name': name,
+            u'swap_total': u'0.0',
+            u'num_proc': u'32',
+            u'mem_used': u'997.4M',
+            u'mem_total': u'7.0G',
+            u'load_avg': u'8.32'
+        }
+        remove_nodes = balancer._find_nodes_for_removal()
+        assert remove_nodes[0].alias == 'host2'
+
+    def test_find_nodes_for_removal_complex_values(self):
+        class ClusterMock(object):
+            pass
+
+        class NodeMock(object):
+            def __init__(self, alias, launch_time):
+                self.alias = alias
+                self.id = alias
+                self.launch_time = launch_time
+
+            def is_master(self):
+                return False
+
+        stat = sge.SGEStats()
+        node_complex_values = {
+            'smallNode': ComplexValues({
+                'da_mem_gb': 1,
+                'da_slots': 1
+            }),
+            'mediumNode': ComplexValues({
+                'da_mem_gb': 8,
+                'da_slots': 4
+            })
+        }
+
+        balancer = sge.SGELoadBalancer(
+            wait_time=900, supported_complex_values=['da_mem_gb', 'da_slots'],
+            node_complex_values=node_complex_values)
+        balancer._stat = stat
+        balancer_mock = SGEBalancerMock(balancer)
+        cluster_mock = ClusterMock()
+        name = 'host1'
+        cluster_mock.running_nodes = [NodeMock(name, '2010-06-18T23:00:00')]
+        balancer._cluster = cluster_mock
+
+        stat.hosts[name] = {
+            u'swap_used': u'0.0',
+            u'arch_string': u'lx24-amd64',
+            'name': name,
+            u'swap_total': u'0.0',
+            u'num_proc': u'32',
+            u'mem_used': u'997.4M',
+            u'mem_total': u'7.0G',
+            u'load_avg': u'8.32',
+            u'available_complex_values': ComplexValues({
+                'da_mem_gb': 7.8,  # usually lower than what is configured
+                'da_slots': 4
+            })
+        }
+        remove_nodes = balancer._find_nodes_for_removal(
+            unusable_types=['smallNode', 'mediumNode'])
+        assert not remove_nodes, "Too soon, nothing should be removed"
+
+        # waiting for long enough
+        balancer_mock.current_time = '2010-06-18T23:59:25'
+        remove_nodes = balancer._find_nodes_for_removal(
+            unusable_types=['smallNode', 'mediumNode'])
+        assert remove_nodes[0].alias == 'host1'
+
+        remove_nodes = balancer._find_nodes_for_removal(
+            unusable_types=['smallNode'])
+        assert not remove_nodes, 'bigger node should not be removed'
+
+        name = 'host2'
+        cluster_mock.running_nodes.append(NodeMock(name,
+                                                   '2010-06-18T23:00:00'))
+        stat.hosts[name] = {
+            u'swap_used': u'0.0',
+            u'arch_string': u'lx24-amd64',
+            'name': name,
+            u'swap_total': u'0.0',
+            u'num_proc': u'32',
+            u'mem_used': u'997.4M',
+            u'mem_total': u'0.99G',
+            u'load_avg': u'8.32',
+            u'available_complex_values': ComplexValues({
+                'da_mem_gb': 0.98,  # usually lower than what is configured
+                'da_slots': 1
+            })
+        }
+
+        remove_nodes = balancer._find_nodes_for_removal(
+            unusable_types=['smallNode'])
+        assert remove_nodes[0].alias == 'host2'
+
+        remove_nodes = balancer._find_nodes_for_removal(
+            unusable_types=['smallNode', 'mediumNode'])
+        assert remove_nodes[0].alias == 'host1'
+        assert remove_nodes[1].alias == 'host2'
+
+        stat.jobs.append(SGEJob({
+            'job_state': u'pending',
+            'queue_name': u'all.q@host2',
+            u'JB_job_number': unicode(len(stat.jobs) + 1),
+            u'JB_owner': u'root',
+            u'state': u'qw',
+            u'JAT_prio': u'0.55500',
+            u'JB_name': u'sleep',
+            u'JB_submission_time': u'2010-06-18T23:39:24',
+            u'slots': u'1',
+            u'hard_request': {
+                'da_slots': 1
+            }
+        }))
+        remove_nodes = balancer._find_nodes_for_removal(
+            unusable_types=['smallNode'])
+        assert not remove_nodes, 'Node busy, should not remove'
+
+        remove_nodes = balancer._find_nodes_for_removal(
+            unusable_types=['smallNode', 'mediumNode'])
+        assert remove_nodes[0].alias == 'host1'
+
+        # specifying only the larget type does the same
+        remove_nodes = balancer._find_nodes_for_removal(
+            unusable_types=['mediumNode'])
+        assert remove_nodes[0].alias == 'host1'
+
+        stat.jobs[0]['queue_name'] = u'all.q@host1'
+        remove_nodes = balancer._find_nodes_for_removal(
+            unusable_types=['mediumNode'])
+        assert remove_nodes[0].alias == 'host2'
+
+        remove_nodes = balancer._find_nodes_for_removal(
+            unusable_types=['smallNode'])
+        assert remove_nodes[0].alias == 'host2'
+
+        stat.jobs.append(SGEJob({
+            'job_state': u'pending',
+            'queue_name': u'all.q@host2',
+            u'JB_job_number': unicode(len(stat.jobs) + 1),
+            u'JB_owner': u'root',
+            u'state': u'qw',
+            u'JAT_prio': u'0.55500',
+            u'JB_name': u'sleep',
+            u'JB_submission_time': u'2010-06-18T23:39:24',
+            u'slots': u'1',
+            u'hard_request': {
+                'da_slots': 1
+            }
+        }))
+
+        remove_nodes = balancer._find_nodes_for_removal(
+            unusable_types=['smallNode'])
+        assert not remove_nodes, 'Nodes busy, should not remove'
+
+        remove_nodes = balancer._find_nodes_for_removal(
+            unusable_types=['smallNode', 'mediumNode'])
+        assert not remove_nodes, 'Nodes busy, should not remove'

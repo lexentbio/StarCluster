@@ -30,6 +30,7 @@ from starcluster import exception
 from starcluster.balancers import LoadBalancer
 from starcluster.logger import log
 from starcluster.exception import ThreadPoolException
+from starcluster.complex_values import ComplexValues
 
 
 SGE_STATS_DIR = os.path.join(static.STARCLUSTER_CFG_DIR, 'sge')
@@ -46,14 +47,15 @@ class SGEStats(object):
     """
     SunGridEngine stats parser
     """
-    def __init__(self, remote_tzinfo=None):
+    def __init__(self, remote_tzinfo=None, supported_complex_values=None):
         self.jobstat_cachesize = 200
-        self.hosts = []
+        self.hosts = {}
         self.jobs = []
         self.queues = {}
         self.jobstats = self.jobstat_cachesize * [None]
         self.max_job_id = 0
         self.remote_tzinfo = remote_tzinfo or utils.get_utc_now().tzinfo
+        self.supported_complex_values = supported_complex_values
 
     @property
     def first_job_id(self):
@@ -70,23 +72,34 @@ class SGEStats(object):
         this function parses qhost -xml output and makes a neat array
         takes in a string, so we can pipe in output from ssh.exec('qhost -xml')
         """
-        self.hosts = []  # clear the old hosts
+        self.hosts = {}  # clear the old hosts
         doc = xml.dom.minidom.parseString(qhost_out)
         for h in doc.getElementsByTagName("host"):
             name = h.getAttribute("name")
-            hash = {"name": name}
+            if name == u'global':
+                continue
+            host = {"name": name}
             for stat in h.getElementsByTagName("hostvalue"):
                 for hvalue in stat.childNodes:
                     attr = stat.attributes['name'].value
                     val = ""
                     if hvalue.nodeType == xml.dom.minidom.Node.TEXT_NODE:
                         val = hvalue.data
-                    hash[attr] = val
-            if hash['name'] != u'global':
-                if name in additional_config:
-                    for k, v in additional_config[name].items():
-                        hash[k] = v
-                self.hosts.append(hash)
+                    host[attr] = val
+            complex_values = ComplexValues()
+            for complex_value in h.getElementsByTagName('resourcevalue'):
+                complex_value[complex_value.getAttrivute('name')] = \
+                    complex_value.firstChild.nodeValue
+            if complex_values:
+                # Important: those are the available complex values/resources
+                # if they are being used they do not reflect the node
+                # configured total
+                host['available_complex_values'] = complex_values
+            if name in additional_config:
+                for k, v in additional_config[name].items():
+                    host[k] = v
+            self.hosts[name] = host
+
         return self.hosts
 
     def parse_qstat(self, qstat_out):
@@ -343,7 +356,7 @@ class SGEStats(object):
         returns an array containing the loads on each host in cluster
         """
         loads = []
-        for h in self.hosts:
+        for h in self.hosts.values():
             load_avg = h['load_avg']
             try:
                 if load_avg == "-":
@@ -400,6 +413,12 @@ class SGEStats(object):
             f.close()
         except IOError, e:
             raise exception.BaseException(str(e))
+
+    def get_node_available_comples_values(self, node):
+        for name, host in self.hosts.iteritems():
+            if name == node.alias:
+                return host['available_complex_values']
+        assert False
 
 
 class SGELoadBalancer(LoadBalancer):
@@ -484,13 +503,15 @@ class SGELoadBalancer(LoadBalancer):
         self._instance_type = instance_type
         self._spot_bid = spot_bid
         self._supported_complex_values = supported_complex_values
-        self._node_complex_values = node_complex_values
+        self._node_complex_values = node_complex_values or {}
 
     @property
     def stat(self):
         if not self._stat:
             rtime = self.get_remote_time()
-            self._stat = SGEStats(remote_tzinfo=rtime.tzinfo)
+            self._stat = SGEStats(
+                remote_tzinfo=rtime.tzinfo,
+                supported_complex_values=self._supported_complex_values)
         return self._stat
 
     @property
@@ -573,7 +594,10 @@ class SGELoadBalancer(LoadBalancer):
         qatime = self.get_qatime(now)
         qacct_cmd = 'qacct -j -b ' + qatime
         qstat_cmd = 'qstat -u \* -xml -f -r'
-        qhostxml = '\n'.join(master.ssh.execute('qhost -xml'))
+        qhost_cmd = 'qhost -xml'
+        if self.supported_complex_values:
+            qhost_cmd += ' -F ' + ' '.join(self.supported_complex_values)
+        qhostxml = '\n'.join(master.ssh.execute(qhost_cmd))
         qstatxml = '\n'.join(master.ssh.execute(qstat_cmd))
         try:
             qacct = '\n'.join(master.ssh.execute(qacct_cmd))
@@ -731,13 +755,38 @@ class SGELoadBalancer(LoadBalancer):
         if num_nodes >= self.max_nodes:
             log.info("Not requiring nodes: already at or above maximum (%d)" %
                      self.max_nodes)
-            return 0
+            return 0, []
 
         queued_jobs = self.stat.get_queued_jobs()
         if not queued_jobs and num_nodes >= self.min_nodes:
             log.info("Not requiring nodes: at or above minimum nodes "
                      "and no queued jobs...")
-            return 0
+            return 0, []
+
+        job_instances_support = self.get_jobs_instances_support(queued_jobs)
+        for job in job_instances_support['unfulfillable']:
+            log.warning("Job %s cannot be fulfilled because it is requesting "
+                        "more resource than any of the configured node has.")
+        # only keep fulllfilable jobs
+        del job_instances_support['unfulfillable']
+        if len(job_instances_support) == 0:
+            log.warning("No instance type can support the queued jobs")
+            return 0, []
+
+        queued_jobs = set()
+        for jobs in job_instances_support.values():
+            queued_jobs = queued_jobs.union(set(jobs))
+
+        if self._instance_type:
+            if self._instance_type not in job_instances_support:
+                log.warning("The static instance type configured cannot "
+                            "support the queued jobs")
+                return 0, []
+            eligible_types = [self._instance_type]
+        else:
+            eligible_types = [k for k, v in job_instances_support.iteritems()
+                              if len(v) == len(queued_jobs)]
+        assert eligible_types
 
         job_instances_support = self.get_jobs_instances_support(queued_jobs)
         for job in job_instances_support['unfulfillable']:
@@ -748,7 +797,7 @@ class SGELoadBalancer(LoadBalancer):
         del job_instances_support['unfulfillable']
         if len(job_instances_support) == 0:
             log.warning("No instance type can support the queued jobs")
-            return 0
+            return 0, []
 
         queued_jobs = set()
         for jobs in job_instances_support.values():
@@ -756,7 +805,7 @@ class SGELoadBalancer(LoadBalancer):
 
         total_slots = self.stat.count_total_slots()
         if not self.has_cluster_stabilized() and total_slots > 0:
-            return 0
+            return 0, []
         running_jobs = self.stat.get_running_jobs()
         slots_per_host = self.stat.slots_per_host()
         assert slots_per_host > 0, "Slots per host cannot be zero."
@@ -802,7 +851,10 @@ class SGELoadBalancer(LoadBalancer):
                 need_to_add = 1
 
         max_add = self.max_nodes - num_nodes
-        return min(self.add_nodes_per_iteration, need_to_add, max_add)
+        need_to_add = min(self.add_nodes_per_iteration, need_to_add, max_add)
+        if need_to_add:
+            return need_to_add, eligible_types
+        return 0, []
 
     def _eval_add_node(self):
         """
@@ -810,7 +862,7 @@ class SGELoadBalancer(LoadBalancer):
         whether or not to add nodes to the cluster. Returns the number of nodes
         to add.
         """
-        need_to_add = self._eval_required_instances()
+        need_to_add, eligible_types = self._eval_required_instances()
         if need_to_add == 0:
             return False
         log.warn("Adding %d nodes at %s" %
@@ -822,7 +874,7 @@ class SGELoadBalancer(LoadBalancer):
                                     n_reboot_restart=self.n_reboot_restart,
                                     placement_group=self._placement_group,
                                     spot_bid=self._spot_bid,
-                                    instance_type=self._instance_type)
+                                    instance_type=eligible_types)
             if num_nodes < len(self._cluster.nodes):
                 self.__last_cluster_mod_time = utils.get_utc_now()
                 log.info("Done adding nodes at %s" %
@@ -847,19 +899,34 @@ class SGELoadBalancer(LoadBalancer):
         This function uses the sge stats to decide whether or not to
         remove a node from the cluster.
         """
-        qlen = len(self.stat.get_queued_jobs())
-        if qlen != 0:
-            return
         if not self.has_cluster_stabilized():
             return
+
         num_nodes = len(self._cluster.nodes)
         if num_nodes <= self.min_nodes:
             log.info("Not removing nodes: already at or below minimum (%d)"
                      % self.min_nodes)
             return
+
+        queued_jobs = self.stat.get_queued_jobs()
+        if len(queued_jobs) == 0:
+            unusable_types = None
+            log.info("No queued jobs, looking for any nodes to remove...")
+        else:
+            job_instances_support = \
+                self.get_jobs_instances_support(queued_jobs)
+            del job_instances_support['unfulfillable']
+            usable_types = set(job_instances_support.keys())
+            configured_types = set(self._node_complex_values.keys())
+            unusable_types = configured_types - usable_types
+            if not unusable_types:
+                return
+            log.info("Queued jobs can't be fulfilled by %s, looking for nodes "
+                     "to remove...", unusable_types)
+
         max_remove = num_nodes - self.min_nodes
-        log.info("Looking for nodes to remove...")
-        remove_nodes = self._find_nodes_for_removal(max_remove=max_remove)
+        remove_nodes = self._find_nodes_for_removal(
+            max_remove=max_remove, unusable_types=unusable_types)
         if not remove_nodes:
             log.info("No nodes can be removed at this time")
         for node in remove_nodes:
@@ -898,7 +965,7 @@ class SGELoadBalancer(LoadBalancer):
             return False
         return self._should_remove(self._cluster.master_node)
 
-    def _should_remove(self, node):
+    def _should_remove(self, node, unusable_specs=None):
         """
         Determines whether a node is eligible to be removed based on:
 
@@ -911,13 +978,17 @@ class SGELoadBalancer(LoadBalancer):
         idle_msg = ("Idle node %s (%s) has been up for %d minutes past "
                     "the hour" % (node.alias, node.id, mins_up))
         if mins_up >= self.kill_after:
-            log.info(idle_msg)
-            return True
-        else:
-            log.debug(idle_msg)
-            return False
+            if unusable_specs is None:
+                log.info(idle_msg)
+                return True
+            complex_values = self.stat.get_node_available_comples_values(node)
+            if complex_values.fits_in_any(unusable_specs):
+                log.info(idle_msg)
+                return True
+        log.debug(idle_msg)
+        return False
 
-    def _find_nodes_for_removal(self, max_remove=None):
+    def _find_nodes_for_removal(self, max_remove=None, unusable_types=None):
         """
         This function returns one or more suitable worker nodes to remove from
         the cluster. The criteria for removal are:
@@ -928,13 +999,21 @@ class SGELoadBalancer(LoadBalancer):
         If max_remove is specified up to max_remove nodes will be returned for
         removal.
         """
+        if unusable_types:
+            unusable_specs = set([
+                values
+                for inst_type, values in self._node_complex_values.iteritems()
+                if inst_type in unusable_types
+            ])
+        else:
+            unusable_specs = None
         remove_nodes = []
         for node in self._cluster.running_nodes:
             if max_remove is not None and len(remove_nodes) >= max_remove:
                 return remove_nodes
             if node.is_master():
                 continue
-            if self._should_remove(node):
+            if self._should_remove(node, unusable_specs):
                 remove_nodes.append(node)
         return remove_nodes
 

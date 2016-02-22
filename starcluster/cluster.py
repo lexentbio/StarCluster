@@ -40,6 +40,7 @@ from starcluster import progressbar
 from starcluster import clustersetup
 from starcluster.node import Node
 from starcluster.node import NodeManager
+from starcluster.complex_values import ComplexValues
 from starcluster.plugins import sge
 from starcluster.utils import print_timing
 from starcluster.templates import user_msgs
@@ -1091,7 +1092,10 @@ class Cluster(object):
         log.debug('Userdata size in KB: %.2f' % utils.size_in_kb(udata))
         return udata
 
-    def select_instance_and_zone(self):
+    def select_instance_and_zone(self, instance_type_filter):
+        if instance_type_filter:
+            log.info("selecting instance type among filter: %s",
+                     instance_type_filter)
         selection = None
         zones_filter = None
         if self.subnet_ids:
@@ -1099,6 +1103,9 @@ class Cluster(object):
                             for s_net in self.subnets_mapping.values()]
 
         for i in self.node_instance_array:
+            if instance_type_filter and \
+                    i['instance_type'] not in instance_type_filter:
+                continue
             zone, price = self.ec2.get_spot_cheapest_zone(
                 i['instance_type'], zones_filter, vpc=self.vpc_id is not None)
             log.debug("%s %s: %f", i['instance_type'], zone, price)
@@ -1130,7 +1137,11 @@ class Cluster(object):
         if force_flat:
             spot_bid = None
         cluster_sg = self.cluster_group.name
-        auto_select_instance_type = instance_type is None
+        if isinstance(instance_type, list):
+            instance_type_filter = instance_type
+            instance_type = None
+        else:
+            instance_type_filter = None
         instance_type = instance_type or self.node_instance_type
         if placement_group or instance_type in static.PLACEMENT_GROUP_TYPES:
             region = self.ec2.region.name
@@ -1149,8 +1160,8 @@ class Cluster(object):
         launch_group = availability_zone_group
 
         if spot_bid and not placement_group and zone is None:
-            if auto_select_instance_type:
-                selection = self.select_instance_and_zone()
+            if instance_type_filter:
+                selection = self.select_instance_and_zone(instance_type_filter)
                 zone = selection['zone']
                 price = selection['price']
                 instance_type = selection['instance_type']
@@ -1268,7 +1279,6 @@ class Cluster(object):
         aliases - list of aliases to assign to new nodes (len must equal
         num_nodes)
         """
-        running_pending = self._nodes_in_states(['pending', 'running'])
         aliases = aliases or []
         if not aliases:
             for i in self._get_free_node_nums(num_nodes):
@@ -1284,38 +1294,40 @@ class Cluster(object):
             for alias in aliases:
                 node = self.get_node(alias)
                 self.run_plugins(method_name="on_add_node", node=node)
-        else:
-            if self.subnet_ids:
-                subnet = None
-                tested = False
-                for s_net in self.subnets_mapping.values():
-                    if zone is None or s_net.availability_zone == zone:
-                        tested = True
-                        ip_count = s_net.available_ip_address_count
-                        if ip_count < len(aliases):
-                            raise exception.ClusterValidationError(
-                                "Not enough IP addresses available in "
-                                "%s (%d)" % (subnet.id, ip_count))
-                assert tested
-            for node in running_pending:
-                if node.alias in aliases:
-                    raise exception.ClusterValidationError(
-                        "node with alias %s already exists" % node.alias)
-            log.info("Launching node(s): %s" % ', '.join(aliases))
-            resp = self.create_nodes(aliases, image_id=image_id,
-                                     instance_type=instance_type, zone=zone,
-                                     placement_group=placement_group,
-                                     spot_bid=spot_bid)
-            if spot_bid or self.spot_bid:
-                streaming_add(self, spots=resp,
-                              reboot_interval=reboot_interval,
-                              n_reboot_restart=n_reboot_restart)
-            else:
-                streaming_add(self, instances=resp[0].instances,
-                              reboot_interval=reboot_interval,
-                              n_reboot_restart=n_reboot_restart)
+            return
 
-        if all([not no_create, spot_bid, reboot_interval, n_reboot_restart]):
+        if self.subnet_ids:
+            subnet = None
+            tested = False
+            for s_net in self.subnets_mapping.values():
+                if zone is None or s_net.availability_zone == zone:
+                    tested = True
+                    ip_count = s_net.available_ip_address_count
+                    if ip_count < len(aliases):
+                        raise exception.ClusterValidationError(
+                            "Not enough IP addresses available in "
+                            "%s (%d)" % (subnet.id, ip_count))
+            assert tested
+        running_pending = self._nodes_in_states(['pending', 'running'])
+        for node in running_pending:
+            if node.alias in aliases:
+                raise exception.ClusterValidationError(
+                    "node with alias %s already exists" % node.alias)
+        log.info("Launching node(s): %s" % ', '.join(aliases))
+        resp = self.create_nodes(aliases, image_id=image_id,
+                                 instance_type=instance_type, zone=zone,
+                                 placement_group=placement_group,
+                                 spot_bid=spot_bid)
+        if spot_bid or self.spot_bid:
+            streaming_add(self, spots=resp,
+                          reboot_interval=reboot_interval,
+                          n_reboot_restart=n_reboot_restart)
+        else:
+            streaming_add(self, instances=resp[0].instances,
+                          reboot_interval=reboot_interval,
+                          n_reboot_restart=n_reboot_restart)
+
+        if all([spot_bid, reboot_interval, n_reboot_restart]):
             # this will recreate the spot instances that might have died in
             # wait_for_cluster
             try_again_aliases = []
@@ -2190,7 +2202,7 @@ class Cluster(object):
     def get_node_complex_values(self):
         res = {}
         for i in self.node_instance_array:
-            vals = {}
+            vals = ComplexValues()
             for part in i.get('complex_values', '').split(','):
                 k, v = part.split('=')
                 vals[k] = float(v)
