@@ -2187,6 +2187,15 @@ class Cluster(object):
                           n_reboot_restart=n_reboot_restart)
         log.info("Out of recover procedure")
 
+    def get_node_complex_values(self):
+        res = {}
+        for i in self.node_instance_array:
+            vals = {}
+            for part in i.get('complex_values', '').split(','):
+                k, v = part.split('=')
+                vals[k] = float(v)
+            res[i['instance_type']] = vals
+
 
 class ClusterValidator(validators.Validator):
 

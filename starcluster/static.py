@@ -321,7 +321,8 @@ NODE_SETTINGS = {
     'spot_bid': (float, False, None, None, None),
     'image_id': (str, True, None, None, None),
     'instance_type': (str, True, None, INSTANCE_TYPES.keys(), None),
-    'selection_factor': (float, False, 1, None, None)
+    'selection_factor': (float, False, 1, None, None),
+    'complex_values': (str, False, None, None, None)
 }
 
 MASTER_CFG_FILE = '/etc/starcluster'  # vanilla improvements

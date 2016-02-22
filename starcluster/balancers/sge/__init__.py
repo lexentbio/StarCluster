@@ -22,6 +22,7 @@ import datetime
 import xml.dom.minidom
 import traceback
 import math
+from collections import defaultdict
 
 from starcluster import utils
 from starcluster import static
@@ -34,6 +35,11 @@ from starcluster.exception import ThreadPoolException
 SGE_STATS_DIR = os.path.join(static.STARCLUSTER_CFG_DIR, 'sge')
 DEFAULT_STATS_DIR = os.path.join(SGE_STATS_DIR, '%s')
 DEFAULT_STATS_FILE = os.path.join(DEFAULT_STATS_DIR, 'sge-stats.csv')
+
+
+class SGEJob(dict):
+    def __hash__(self):
+        return int(self['JB_job_number'])
 
 
 class SGEStats(object):
@@ -107,10 +113,17 @@ class SGEStats(object):
         for node in job.childNodes:
             if node.nodeType == xml.dom.minidom.Node.ELEMENT_NODE:
                 for child in node.childNodes:
-                    jdict[node.nodeName] = child.data
+                    if node.nodeName == 'hard_request':
+                        hard_requests = jdict.get(node.nodeName, {})
+                        hard_requests[node.getAttribute('name')] = \
+                            float(node.firstChild.nodeValue)
+                        jdict[node.nodeName] = hard_requests
+                    else:
+                        jdict[node.nodeName] = child.data
         num_tasks = self._count_tasks(jdict)
         log.debug("Job contains %d tasks" % num_tasks)
-        return [jdict] * num_tasks
+        job = SGEJob(jdict)
+        return [job] * num_tasks
 
     def _count_tasks(self, jdict):
         """
@@ -440,7 +453,8 @@ class SGELoadBalancer(LoadBalancer):
                  min_nodes=None, kill_cluster=False, plot_stats=False,
                  plot_output_dir=None, dump_stats=False, stats_file=None,
                  reboot_interval=10, n_reboot_restart=False,
-                 ignore_grp=False, instance_type=None, spot_bid=None):
+                 ignore_grp=False, instance_type=None, spot_bid=None,
+                 supported_complex_values=None, node_complex_values=None):
         self._cluster = None
         self._keep_polling = True
         self._visualizer = None
@@ -469,6 +483,8 @@ class SGELoadBalancer(LoadBalancer):
         self.n_reboot_restart = n_reboot_restart
         self._instance_type = instance_type
         self._spot_bid = spot_bid
+        self._supported_complex_values = supported_complex_values
+        self._node_complex_values = node_complex_values
 
     @property
     def stat(self):
@@ -597,13 +613,7 @@ class SGELoadBalancer(LoadBalancer):
             "Failed to retrieve SGE stats after trying %d times, exiting..." %
             retries)
 
-    def run(self, cluster):
-        """
-        This function will loop indefinitely, using SGELoadBalancer.get_stats()
-        to get the clusters status. It looks at the job queue and tries to
-        decide whether to add or remove a node.  It should later look at job
-        durations (currently doesn't)
-        """
+    def _run_init(self, cluster):
         self._cluster = cluster
         if self.max_nodes is None:
             self.max_nodes = cluster.cluster_size
@@ -614,6 +624,7 @@ class SGELoadBalancer(LoadBalancer):
         if self.min_nodes > self.max_nodes:
             raise exception.BaseException(
                 "min_nodes cannot be greater than max_nodes")
+
         use_default_stats_file = self.dump_stats and not self.stats_file
         use_default_plots_dir = self.plot_stats and not self.plot_output_dir
         if use_default_stats_file or use_default_plots_dir:
@@ -637,6 +648,15 @@ class SGELoadBalancer(LoadBalancer):
                                               self.plot_output_dir)
             self._validate_dir(self.plot_output_dir,
                                msg_prefix="plot output destination")
+
+    def run(self, cluster):
+        """
+        This function will loop indefinitely, using SGELoadBalancer.get_stats()
+        to get the clusters status. It looks at the job queue and tries to
+        decide whether to add or remove a node.  It should later look at job
+        durations (currently doesn't)
+        """
+        self._run_init(cluster)
         raw = dict(__raw__=True)
         log.info("Starting load balancer (Use ctrl-c to exit)")
         log.info("Maximum cluster size: %d" % self.max_nodes,
@@ -719,10 +739,24 @@ class SGELoadBalancer(LoadBalancer):
                      "and no queued jobs...")
             return 0
 
+        job_instances_support = self.get_jobs_instances_support(queued_jobs)
+        for job in job_instances_support['unfulfillable']:
+            log.warning("Job %s cannot be fulfilled because it is requesting "
+                        "more resource than any of the configured node has.",
+                        job['JB_job_number'])
+        # only keep fulllfilable jobs
+        del job_instances_support['unfulfillable']
+        if len(job_instances_support) == 0:
+            log.warning("No instance type can support the queued jobs")
+            return 0
+
+        queued_jobs = set()
+        for jobs in job_instances_support.values():
+            queued_jobs = queued_jobs.union(set(jobs))
+
         total_slots = self.stat.count_total_slots()
         if not self.has_cluster_stabilized() and total_slots > 0:
             return 0
-
         running_jobs = self.stat.get_running_jobs()
         slots_per_host = self.stat.slots_per_host()
         assert slots_per_host > 0, "Slots per host cannot be zero."
@@ -743,7 +777,7 @@ class SGELoadBalancer(LoadBalancer):
                      "longer than max: %d" %
                      (age_delta.seconds, self.longest_allowed_queue_time))
             if running_jobs:
-                count = self.count_queued_jobs_waiting_for_too_long()
+                count = self.count_jobs_queued_for_too_long(queued_jobs)
                 assert count > 0, \
                     "There should be 1 or more jobs waiting for too long."
                 slots_jobs_ratio = float(total_slots) / len(running_jobs)
@@ -916,10 +950,30 @@ class SGELoadBalancer(LoadBalancer):
         timedelta = now - dt
         return timedelta.seconds / 60
 
-    def count_queued_jobs_waiting_for_too_long(self):
+    def get_jobs_instances_support(self, jobs):
+        assert len(self._node_complex_values) > 0
+        res = defaultdict(list)
+        for job in jobs:
+            found_instance = False
+            for inst_type, c_vals in self._node_complex_values.iteritems():
+                for name, val in job.get('hard_request', {}).iteritems():
+                    if name not in self._supported_complex_values:
+                        continue
+                    if name not in c_vals:
+                        break
+                    if val > c_vals[name]:
+                        break
+                else:
+                    found_instance = True
+                    res[inst_type].append(job)
+            if not found_instance:
+                res['unfulfillable'].append(job)
+        return res
+
+    def count_jobs_queued_for_too_long(self, jobs):
         jobs_waiting_for_too_long = 0
         now = self.get_remote_time()
-        for j in self.stat.get_queued_jobs():
+        for j in jobs:
             if j['state'] != 'qw':
                 # Ignore jobs on non normal waiting state
                 continue

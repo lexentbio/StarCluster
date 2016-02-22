@@ -17,6 +17,7 @@
 
 from starcluster import exception
 from starcluster.balancers import sge
+from starcluster.plugins.sge import SGEPlugin
 
 from completers import ClusterCompleter
 
@@ -139,7 +140,16 @@ class CmdLoadBalance(ClusterCompleter):
             cluster = self.cm.get_cluster(cluster_tag)
             cluster.recover(self.opts.reboot_interval,
                             self.opts.n_reboot_restart)
-            lb = sge.SGELoadBalancer(**self.specified_options_dict)
+            for plugin in cluster.plugins:
+                if isinstance(plugin, SGEPlugin):
+                    sge_plugin = plugin
+                    break
+            else:
+                raise exception.BaseException("SGEPlugin not found")
+            lb = sge.SGELoadBalancer(
+                supported_complex_values=sge_plugin.supported_complex_values,
+                node_complex_values=cluster.get_node_complex_values(),
+                **self.specified_options_dict)
             lb.run(cluster)
         except KeyboardInterrupt:
             import traceback

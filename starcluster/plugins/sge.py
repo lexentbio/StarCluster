@@ -40,9 +40,11 @@ class SGEPlugin(clustersetup.DefaultClusterSetup):
     SGE_CONF = "ec2_sge.conf"
 
     def __init__(self, master_is_exec_host=True, slots_per_host=None,
-                 **kwargs):
+                 supported_complex_values=None, **kwargs):
         self.master_is_exec_host = str(master_is_exec_host).lower() == "true"
         self.slots_per_host = None
+        self.supported_complex_values = supported_complex_values.split(',') \
+            if supported_complex_values else []
         if slots_per_host is not None:
             self.slots_per_host = int(slots_per_host)
         super(SGEPlugin, self).__init__(**kwargs)

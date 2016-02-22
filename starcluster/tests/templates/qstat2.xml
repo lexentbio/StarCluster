@@ -1,0 +1,112 @@
+<?xml version='1.0'?>
+<job_info  xmlns:xsd="http://gridscheduler.svn.sourceforge.net/viewvc/gridscheduler/trunk/source/dist/util/resources/schemas/qstat/qstat.xsd?revision=11">
+  <queue_info>
+    <Queue-List>
+      <name>all.q@master</name>
+      <qtype>BIP</qtype>
+      <slots_used>0</slots_used>
+      <slots_resv>0</slots_resv>
+      <slots_total>0</slots_total>
+      <arch>linux-x64</arch>
+      <state>au</state>
+    </Queue-List>
+    <Queue-List>
+      <name>all.q@node011</name>
+      <qtype>BIP</qtype>
+      <slots_used>1</slots_used>
+      <slots_resv>0</slots_resv>
+      <slots_total>32</slots_total>
+      <load_avg>33.18000</load_avg>
+      <arch>linux-x64</arch>
+      <job_list state="running">
+        <JB_job_number>5920458</JB_job_number>
+        <JAT_prio>0.50617</JAT_prio>
+        <JB_name>job1</JB_name>
+        <JB_owner>datacratic</JB_owner>
+        <state>r</state>
+        <JAT_start_time>2016-02-16T10:45:07</JAT_start_time>
+        <slots>1</slots>
+        <full_job_name>job1</full_job_name>
+        <hard_request name="da_mem_gb" resource_contribution="0.000000">32.000000</hard_request>
+        <hard_request name="da_slots" resource_contribution="0.000000">32</hard_request>
+        <hard_request name="s_rt" resource_contribution="0.000000">72060</hard_request>
+      </job_list>
+    </Queue-List>
+    <Queue-List>
+      <name>all.q@node020</name>
+      <qtype>BIP</qtype>
+      <slots_used>2</slots_used>
+      <slots_resv>0</slots_resv>
+      <slots_total>32</slots_total>
+      <load_avg>23.91000</load_avg>
+      <arch>linux-x64</arch>
+      <job_list state="running">
+        <JB_job_number>5918172</JB_job_number>
+        <JAT_prio>0.50617</JAT_prio>
+        <JB_name>job2</JB_name>
+        <JB_owner>datacratic</JB_owner>
+        <state>r</state>
+        <JAT_start_time>2016-02-16T09:05:37</JAT_start_time>
+        <slots>1</slots>
+        <full_job_name>job2</full_job_name>
+        <hard_request name="da_mem_gb" resource_contribution="0.000000">120.000000</hard_request>
+        <hard_request name="da_slots" resource_contribution="0.000000">16</hard_request>
+        <hard_request name="s_rt" resource_contribution="0.000000">72060</hard_request>
+      </job_list>
+      <job_list state="running">
+        <JB_job_number>5920486</JB_job_number>
+        <JAT_prio>0.50617</JAT_prio>
+        <JB_name>job3</JB_name>
+        <JB_owner>datacratic</JB_owner>
+        <state>r</state>
+        <JAT_start_time>2016-02-16T11:03:12</JAT_start_time>
+        <slots>1</slots>
+        <full_job_name>job3</full_job_name>
+        <hard_request name="da_mem_gb" resource_contribution="0.000000">70.000000</hard_request>
+        <hard_request name="da_slots" resource_contribution="0.000000">16</hard_request>
+        <hard_request name="s_rt" resource_contribution="0.000000">64860</hard_request>
+      </job_list>
+    </Queue-List>
+  </queue_info>
+  <job_info>
+    <job_list state="pending">
+      <JB_job_number>5920487</JB_job_number>
+      <JAT_prio>0.50617</JAT_prio>
+      <JB_name>job4</JB_name>
+      <JB_owner>datacratic</JB_owner>
+      <state>qw</state>
+      <JB_submission_time>2016-02-16T11:04:30</JB_submission_time>
+      <slots>1</slots>
+      <full_job_name>job4</full_job_name>
+      <hard_request name="da_mem_gb" resource_contribution="0.000000">70.000000</hard_request>
+      <hard_request name="da_slots" resource_contribution="0.000000">16</hard_request>
+      <hard_request name="s_rt" resource_contribution="0.000000">3660</hard_request>
+    </job_list>
+    <job_list state="pending">
+      <JB_job_number>5920488</JB_job_number>
+      <JAT_prio>0.50617</JAT_prio>
+      <JB_name>job5</JB_name>
+      <JB_owner>datacratic</JB_owner>
+      <state>qw</state>
+      <JB_submission_time>2016-02-16T11:04:34</JB_submission_time>
+      <slots>1</slots>
+      <full_job_name>job5</full_job_name>
+      <hard_request name="da_mem_gb" resource_contribution="0.000000">70.000000</hard_request>
+      <hard_request name="da_slots" resource_contribution="0.000000">16</hard_request>
+      <hard_request name="s_rt" resource_contribution="0.000000">3660</hard_request>
+    </job_list>
+    <job_list state="pending">
+      <JB_job_number>5920489</JB_job_number>
+      <JAT_prio>0.50617</JAT_prio>
+      <JB_name>job6</JB_name>
+      <JB_owner>datacratic</JB_owner>
+      <state>qw</state>
+      <JB_submission_time>2016-02-16T11:04:35</JB_submission_time>
+      <slots>1</slots>
+      <full_job_name>job6</full_job_name>
+      <hard_request name="da_mem_gb" resource_contribution="0.000000">70.000000</hard_request>
+      <hard_request name="da_slots" resource_contribution="0.000000">16</hard_request>
+      <hard_request name="s_rt" resource_contribution="0.000000">115260</hard_request>
+    </job_list>
+  </job_info>
+</job_info>
