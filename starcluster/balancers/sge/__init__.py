@@ -86,15 +86,15 @@ class SGEStats(object):
                     if hvalue.nodeType == xml.dom.minidom.Node.TEXT_NODE:
                         val = hvalue.data
                     host[attr] = val
-            complex_values = ComplexValues()
+            host_complex_values = ComplexValues()
             for complex_value in h.getElementsByTagName('resourcevalue'):
-                complex_value[complex_value.getAttrivute('name')] = \
+                host_complex_values[complex_value.getAttribute('name')] = \
                     complex_value.firstChild.nodeValue
-            if complex_values:
+            if host_complex_values:
                 # Important: those are the available complex values/resources
                 # if they are being used they do not reflect the node
                 # configured total
-                host['available_complex_values'] = complex_values
+                host['available_complex_values'] = host_complex_values
             if name in additional_config:
                 for k, v in additional_config[name].items():
                     host[k] = v
@@ -766,7 +766,8 @@ class SGELoadBalancer(LoadBalancer):
         job_instances_support = self.get_jobs_instances_support(queued_jobs)
         for job in job_instances_support['unfulfillable']:
             log.warning("Job %s cannot be fulfilled because it is requesting "
-                        "more resource than any of the configured node has.")
+                        "more resource than any of the configured node has.",
+                        job['JB_job_number'])
         # only keep fulllfilable jobs
         del job_instances_support['unfulfillable']
         if len(job_instances_support) == 0:
@@ -787,21 +788,6 @@ class SGELoadBalancer(LoadBalancer):
             eligible_types = [k for k, v in job_instances_support.iteritems()
                               if len(v) == len(queued_jobs)]
         assert eligible_types
-
-        job_instances_support = self.get_jobs_instances_support(queued_jobs)
-        for job in job_instances_support['unfulfillable']:
-            log.warning("Job %s cannot be fulfilled because it is requesting "
-                        "more resource than any of the configured node has.",
-                        job['JB_job_number'])
-        # only keep fulllfilable jobs
-        del job_instances_support['unfulfillable']
-        if len(job_instances_support) == 0:
-            log.warning("No instance type can support the queued jobs")
-            return 0, []
-
-        queued_jobs = set()
-        for jobs in job_instances_support.values():
-            queued_jobs = queued_jobs.union(set(jobs))
 
         total_slots = self.stat.count_total_slots()
         if not self.has_cluster_stabilized() and total_slots > 0:
@@ -1032,6 +1018,7 @@ class SGELoadBalancer(LoadBalancer):
     def get_jobs_instances_support(self, jobs):
         assert len(self._node_complex_values) > 0
         res = defaultdict(list)
+        res['unfulfillable'] = []
         for job in jobs:
             found_instance = False
             for inst_type, c_vals in self._node_complex_values.iteritems():
