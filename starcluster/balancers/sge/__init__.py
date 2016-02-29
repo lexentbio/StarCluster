@@ -302,8 +302,8 @@ class SGEStats(object):
         """
         nodename = node.alias
         for j in self.jobs:
-            qn = j.get('queue_name', '')
-            if nodename in qn:
+            qn = j.get('queue_name', None)
+            if qn is not None and nodename in qn:
                 log.debug("Node %s is working" % node.alias)
                 return True
         log.debug("Node %s is IDLE" % node.id)
