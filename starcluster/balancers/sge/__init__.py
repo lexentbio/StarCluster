@@ -128,8 +128,13 @@ class SGEStats(object):
                 for child in node.childNodes:
                     if node.nodeName == 'hard_request':
                         hard_requests = jdict.get(node.nodeName, {})
-                        hard_requests[node.getAttribute('name')] = \
-                            float(node.firstChild.nodeValue)
+                        try:
+                            hard_requests[node.getAttribute('name')] = \
+                                float(node.firstChild.nodeValue)
+                        except ValueError:
+                            # non float hard_request: we don't care it
+                            # eg.: like hostname
+                            continue
                         jdict[node.nodeName] = hard_requests
                     else:
                         jdict[node.nodeName] = child.data
