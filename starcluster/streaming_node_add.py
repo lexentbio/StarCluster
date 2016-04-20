@@ -130,15 +130,14 @@ class StreamingNodeAdd(object):
             del self.instances_nrm[instance.id]
 
     def stream_ready_instances(self):
+        up_nodes = filter(lambda n: n.is_up(), self.cluster.nodes)
         for ready_instance in self.ready_instances:
             log.info("Adding node: %s" % ready_instance.alias)
-            up_nodes = filter(lambda n: n.is_up(), self.cluster.nodes)
+            start = time.time()
             try:
                 self.cluster.run_plugins(method_name="on_add_node",
                                          node=ready_instance, nodes=up_nodes)
-                # success
-                del self.instances_nrm[ready_instance.id]
-            except:
+            except Exception:
                 log.error("Failed to add node {}"
                           .format(ready_instance.alias), exc_info=True)
                 if self.instances_nrm[ready_instance.id].handle_reboot():
@@ -147,6 +146,11 @@ class StreamingNodeAdd(object):
                 else:
                     # dead, delete
                     del self.instances_nrm[ready_instance.id]
+            else:
+                # success
+                del self.instances_nrm[ready_instance.id]
+                log.info("Added node %s in %f secs" %
+                         (ready_instance.alias, time.time() - start))
 
     def run(self):
         """
