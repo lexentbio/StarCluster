@@ -66,8 +66,8 @@ user_lists        NONE
 xuser_lists       NONE
 start_proc_args   /bin/true
 stop_proc_args    /bin/true
-allocation_rule   $fill_up
-control_slaves    TRUE
+allocation_rule   $pe_slots
+control_slaves    FALSE
 job_is_first_task FALSE
 urgency_slots     min
 accounting_summary FALSE

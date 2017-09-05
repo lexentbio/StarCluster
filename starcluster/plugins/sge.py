@@ -66,7 +66,7 @@ class SGEPlugin(clustersetup.DefaultClusterSetup):
         node.ssh.execute('rm /etc/init.d/sge*', ignore_exit_status=True)
         self._inst_sge(node, exec_host=True)
 
-    def _create_sge_pe(self, name="orte", nodes=None, queue="all.q"):
+    def _create_sge_pe(self, name="smp", nodes=None, queue="all.q"):
         """
         Create or update an SGE parallel environment
 
